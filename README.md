@@ -1,1 +1,1 @@
-# QEC-Analysis
+# QEC Analysis
