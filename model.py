@@ -7,9 +7,10 @@ class StabilizerModel:
         self,
         circuit: stim.Circuit = None,
         rounds: int = 1,
-        noise_data: list[float] = [0, 0, 0],
-        noise_check: list[float] = [0, 0, 0],
+        noise_data: list[float] = None,
+        noise_check: list[float] = None,
         noise_main: list[float] = None,
+        noise_phenom: list[float] = None,
     ):
         self.circuit = stim.Circuit() if circuit is None else circuit
 
@@ -19,10 +20,9 @@ class StabilizerModel:
         else:
             self.noise_data = noise_data
             self.noise_check = noise_check
+        self.noise_phenom = noise_phenom
 
     # ------------------------------------ Setters and Getters ------------------------------------
-
-    
 
     # -------------------------------------- Utility Methods --------------------------------------
 
@@ -36,6 +36,9 @@ class StabilizerModel:
                     round_list[j] += "\n"
             print(f"Shot {i}:\n" + "".join(round_list))
         print("\n")
+
+    def print(self):
+        print(self.circuit, "\n")
 
     # ------------------------------------------- Codes -------------------------------------------
 
@@ -54,22 +57,24 @@ class StabilizerModel:
         data_qubits = qubits[::2]
         check_qubits = qubits[1::2]
 
-        # Apply random errors on data qubits BEFORE stabilizer measurements.
-        error_types = ["X", "Y", "Z"]
-        for error_type, probability in zip(error_types, self.noise_data):
-            self.circuit.append(f"{error_type}_ERROR", data_qubits, probability)
-
-        # Apply random errors on measure qubits BEFORE stabilizer measurements.
-        for error_type, probability in zip(error_types, self.noise_check):
-            self.circuit.append(f"{error_type}_ERROR", check_qubits, probability)
+        # Apply random errors on qubits BEFORE stabilizer measurements, simulating a noisy channel.
+        if self.noise_data is not None:
+            self.circuit.append("PAULI_CHANNEL_1", data_qubits, self.noise_data)
+        if self.noise_check is not None:
+            self.circuit.append("PAULI_CHANNEL_1", check_qubits, self.noise_check)
 
         # Stabilizer measurements.
         for m in check_qubits:
             self.circuit.append("CNOT", [m - 1, m])
             self.circuit.append("CNOT", [m + 1, m])
 
+            if self.noise_phenom is not None:
+                self.circuit.append("PAULI_CHANNEL_2", [m - 1, m], self.noise_phenom)
+                self.circuit.append("PAULI_CHANNEL_2", [m + 1, m], self.noise_phenom)
+
         # This measures and resets (to zero) the check qubits.
         self.circuit.append("MR", check_qubits)
 
         # Stim supports multiplication of circuits, so we essentially extend what we have so far.
-        return self.circuit * self.rounds
+        self.circuit *= self.rounds
+        return self.circuit
