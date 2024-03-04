@@ -2,88 +2,109 @@ import numpy as np
 import stim
 
 
+def generate_hypergraph_pcm(H1: np.ndarray, H2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    r1, n1 = H1.shape
+    r2, n2 = H2.shape
+    HX = np.append(np.kron(H1, np.eye(n2)), np.kron(np.eye(r1), H2.T), axis=1)
+    HZ = np.append(np.kron(np.eye(n1), H2), np.kron(H1.T, np.eye(r2)), axis=1)
+    return HX, HZ
+
+
 class StabilizerModel:
-    def __init__(self, circuit: stim.Circuit = None, rounds: int = 3):
+    def __init__(
+        self,
+        code: str,
+        circuit: stim.Circuit = None,
+        rounds: int = 3,
+        noise_circuit: float | list[float] = 0.0,
+        noise_data: float | list[float] = 0.0,
+        noise_z_check: float | list[float] = 0.0,
+        noise_x_check: float | list[float] = 0.0,
+        **kwargs,
+    ) -> None:
         self.circuit = stim.Circuit() if circuit is None else circuit
         self.rounds = rounds
 
-        self.noise_data: list[float] = None
-        self.noise_check: list[float] = None
-        self.noise_circuit: list[float] = None
-
-        self.code: str = None
-        self.code_params: dict = None
-
         self.qubits = []
         self.data_qubits = []
-        self.check_qubits = []
+        self.z_check_qubits = []
+        self.x_check_qubits = []
 
-        # TODO: Implement X and Z error propagation analysis
-
-        """
-        TODO: Embedding vs performance: 
-            - Hypergraph to graph, from parity check matrix (tripartite graph).
-            - Random or specified embedding given a surface in 3-space.
-            - Add specified error to crossings -> analyze propagation: some errors are less
-              problematic than others!
-                - If optimal embedding of seed code in 1D, does that mean anything in the
-                  optimal embedding of the quantum code?
-                - Analyze classical one-dimensional embeddings of seed codes... Start here!
-            - Crossings with longer-ranged connections worse?
-            
-        
-        Extra: How do we CONSTRUCT good embedding?
-        """
-
-    # ------------------------------------ Setters and Getters ------------------------------------
-
-    def set_noise_circuit(self, p: float, noise_circuit: list[float] = None) -> None:
-        if noise_circuit is None:
-            self.noise_circuit = [p / 15 for _ in range(15)]
+        if type(noise_circuit) is float:
+            self.noise_circuit = [noise_circuit / 15 for _ in range(15)]
         else:
             assert (
                 len(noise_circuit) == 15
             ), f"Stabilizer measurement noise takes 15 parameters, given {len(noise_circuit)}."
-            assert (
-                sum(noise_circuit) == p
-            ), f"Stabilizer measurement noise has to sum to p = {p}, but sums to {sum(noise_circuit)}"
             self.noise_circuit = noise_circuit
 
-    def set_noise_qubits(self, p: float, noise_main: list[float] = None) -> None:
-        if noise_main is None:
-            self.noise_data = [p / 3 for _ in range(3)]
-            self.noise_check = [p / 3 for _ in range(3)]
-        else:
-            assert len(noise_main) == 3, f"Qubit noise takes 3 parameters, given {len(noise_main)}."
-            assert (
-                sum(noise_main) == p
-            ), f"Qubit noise has to sum to p = {p}, but sums to {sum(noise_main)}"
-            self.noise_data = noise_main
-            self.noise_check = noise_main
-
-    def set_noise_data(self, p: float, noise_data: list[float] = None) -> None:
-        if noise_data is None:
-            self.noise_data = [p / 3 for _ in range(3)]
+        if type(noise_data) is float:
+            self.noise_data = [noise_data / 3 for _ in range(3)]
         else:
             assert (
                 len(noise_data) == 3
             ), f"Data qubit noise takes 3 parameters, given {len(noise_data)}."
-            assert (
-                sum(noise_data) == p
-            ), f"Data qubit noise has to sum to p = {p}, but sums to {sum(noise_data)}"
             self.noise_data = noise_data
 
-    def set_noise_check(self, p: float, noise_check: list[float] = None) -> None:
-        if noise_check is None:
-            self.noise_data = [p / 3 for _ in range(3)]
+        if type(noise_z_check) is float:
+            self.noise_z_check = [noise_z_check / 3 for _ in range(3)]
         else:
             assert (
-                len(noise_check) == 3
-            ), f"Data qubit noise takes 3 parameters, given {len(noise_check)}."
+                len(noise_z_check) == 3
+            ), f"Z check qubit noise takes 3 parameters, given {len(noise_z_check)}."
+            self.noise_z_check = noise_z_check
+
+        if type(noise_x_check) is float:
+            self.noise_x_check = [noise_x_check / 3 for _ in range(3)]
+        else:
             assert (
-                sum(noise_check) == p
-            ), f"Data qubit noise has to sum to p = {p}, but sums to {sum(noise_check)}"
-            self.noise_check = noise_check
+                len(noise_x_check) == 3
+            ), f"Data qubit noise takes 3 parameters, given {len(noise_z_check)}."
+            self.noise_x_check = noise_x_check
+
+        self.code_params: dict = kwargs
+        match code:
+            case "repetition":
+                distance = self.code_params["distance"]
+                self.qubits = np.arange(2 * distance + 1)
+                self.data_qubits = self.qubits[::2]
+                self.z_check_qubits = self.qubits[1::2]
+                self._repetition_code()
+            case "surface":
+                scale = self.code_params["scale"]
+                assert (
+                    scale[0] % 2 != 0 and scale[1] % 2 != 0
+                ), "Scale of the surface code must be odd."
+
+                self.qubits = np.arange(scale[0] * scale[1])
+                self.data_qubits = []
+                self.x_check_qubits = []
+                self.z_check_qubits = []
+                for row in range(scale[0]):
+                    for col in range(scale[1]):
+                        curr_qubit = row * scale[1] + col
+                        self.circuit.append("QUBIT_COORDS", [curr_qubit], [row, col])
+                        if row % 2 == 0:
+                            if col % 2 == 0:
+                                self.data_qubits.append(curr_qubit)
+                            else:
+                                self.z_check_qubits.append(curr_qubit)
+                        elif row % 2 != 0:
+                            if col % 2 != 0:
+                                self.data_qubits.append(curr_qubit)
+                            else:
+                                self.x_check_qubits.append(curr_qubit)
+                self._surface_code()
+            case _:
+                raise ValueError("Code not recognized.")
+
+        # TODO: Implement X and Z error propagation analysis
+
+    # ------------------------------------ Setters and Getters ------------------------------------
+
+    def reset_data_qubits(self) -> None:
+        # TODO: Change to `set_data_qubits` and have it set the data qubits generally.
+        self.circuit.append("R", self.data_qubits)
 
     # -------------------------------------- Utility Methods --------------------------------------
 
@@ -95,9 +116,9 @@ class StabilizerModel:
                 round_list.append("o" if outcome else "_")
 
                 # Line formatting.
-                if ((j + 1) % len(self.check_qubits) == 0) and ((j + 1) != len(sample) - 1):
+                if ((j + 1) % len(self.z_check_qubits) == 0) and ((j + 1) != len(sample) - 1):
                     round_list[j] += "\n"
-                if (j + 1) == (1 + self.rounds) * len(self.check_qubits):
+                if (j + 1) == (1 + self.rounds) * len(self.z_check_qubits):
                     round_list[j] += "\n"
             print(f"Shot {i + 1}:\n" + "".join(round_list))
         print()
@@ -110,9 +131,9 @@ class StabilizerModel:
                 round_list.append("x" if outcome else "_")
 
                 # Line formatting.
-                if (j + 1) % len(self.check_qubits) == 0:
+                if (j + 1) % len(self.z_check_qubits) == 0:
                     round_list[j] += "\n"
-                if (j + 1) == self.rounds * len(self.check_qubits):
+                if (j + 1) == self.rounds * len(self.z_check_qubits):
                     round_list[j] += "\n"
             print(f"Shot {i + 1}:\n" + "".join(round_list))
         print()
@@ -130,39 +151,218 @@ class StabilizerModel:
         round_list = [marker if outcome else "_" for outcome in sample]
         return np.reshape(round_list, (effective_rounds, len(sample) // effective_rounds))
 
-    def print(self):
+    def print(self) -> None:
         print(self.circuit, "\n")
 
     # TODO: Decode with BP-OSD, and see if this accounts for the FULL error model.
 
     # ------------------------------------------- Codes -------------------------------------------
 
-    def repetition_code(self, distance: int) -> None:
-        self.qubits = np.arange(2 * distance + 1)
-        self.data_qubits = self.qubits[::2]
-        self.check_qubits = self.qubits[1::2]
+    # def hypergraph_product_code(self, H1: np.array, H2: np.array) -> None:
+    #     self.qubits = np.arange()
+    #     HX, HZ = generate_hypergraph_pcm(H1, H2)
 
-        self.code = "repetition_code"
-        self.code_params = {"distance": distance}
+    def _surface_code(self) -> None:
+        scale = self.code_params["scale"]
 
-    # ----------------------------------------- Measure -------------------------------------------
+        self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)
 
-    def measure(self) -> None:
-        match self.code:
-            case "repetition_code":
-                self._repetition_measure(**self.code_params)
-            case _:
-                raise ValueError("Attempting to measure stabilizers without a code specified.")
+        # Check and noise.
+        circuit = stim.Circuit()
+        for row in range(scale[0]):
+            for col in range(scale[1]):
+                curr_qubit = row * scale[1] + col
+                if row % 2 == 0 and col % 2 != 0:
+                    # Z check and boundary conditions.
+                    circuit.append("CNOT", [curr_qubit - 1, curr_qubit])
+                    circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
 
-    def _repetition_measure(self, distance: int) -> None:
+                    if row == 0:
+                        circuit.append("CNOT", [curr_qubit + scale[0], curr_qubit])
+                    elif row == scale[0] - 1:
+                        circuit.append("CNOT", [curr_qubit - scale[0], curr_qubit])
+                    else:
+                        circuit.append("CNOT", [curr_qubit - scale[0], curr_qubit])
+                        circuit.append("CNOT", [curr_qubit + scale[0], curr_qubit])
+
+                    # Gate noise.
+                    if self.noise_circuit is not None:
+                        circuit.append(
+                            "PAULI_CHANNEL_2", [curr_qubit - 1, curr_qubit], self.noise_circuit
+                        )
+                        circuit.append(
+                            "PAULI_CHANNEL_2", [curr_qubit + 1, curr_qubit], self.noise_circuit
+                        )
+                        if row == 0:
+                            circuit.append(
+                                "PAULI_CHANNEL_2",
+                                [curr_qubit + scale[0], curr_qubit],
+                                self.noise_circuit,
+                            )
+                        elif row == scale[0] - 1:
+                            circuit.append(
+                                "PAULI_CHANNEL_2",
+                                [curr_qubit - scale[0], curr_qubit],
+                                self.noise_circuit,
+                            )
+                        else:
+                            circuit.append(
+                                "PAULI_CHANNEL_2",
+                                [curr_qubit - scale[0], curr_qubit],
+                                self.noise_circuit,
+                            )
+                            circuit.append(
+                                "PAULI_CHANNEL_2",
+                                [curr_qubit + scale[0], curr_qubit],
+                                self.noise_circuit,
+                            )
+
+                elif row % 2 != 0 and col % 2 == 0:
+                    # X check and boundary conditions.
+                    circuit.append("H", [curr_qubit])
+
+                    circuit.append("CNOT", [curr_qubit - scale[0], curr_qubit])
+                    circuit.append("CNOT", [curr_qubit + scale[0], curr_qubit])
+                    if col == 0:
+                        circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
+                    elif col == scale[1] - 1:
+                        circuit.append("CNOT", [curr_qubit - 1, curr_qubit])
+                    else:
+                        circuit.append("CNOT", [curr_qubit - 1, curr_qubit])
+                        circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
+
+                    circuit.append("H", [curr_qubit])
+                    # TODO: Apply noise after Hadamard gates.
+
+                    # Gate noise.
+                    if self.noise_circuit is not None:
+                        circuit.append(
+                            "PAULI_CHANNEL_2",
+                            [curr_qubit - scale[0], curr_qubit],
+                            self.noise_circuit,
+                        )
+                        circuit.append(
+                            "PAULI_CHANNEL_2",
+                            [curr_qubit + scale[0], curr_qubit],
+                            self.noise_circuit,
+                        )
+                        if col == 0:
+                            circuit.append(
+                                "PAULI_CHANNEL_2", [curr_qubit + 1, curr_qubit], self.noise_circuit
+                            )
+                        elif col == scale[1] - 1:
+                            circuit.append(
+                                "PAULI_CHANNEL_2", [curr_qubit - 1, curr_qubit], self.noise_circuit
+                            )
+                        else:
+                            circuit.append(
+                                "PAULI_CHANNEL_2", [curr_qubit - 1, curr_qubit], self.noise_circuit
+                            )
+                            circuit.append(
+                                "PAULI_CHANNEL_2", [curr_qubit + 1, curr_qubit], self.noise_circuit
+                            )
+
+        # Qubit noise.
+        if self.noise_data is not None:
+            circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
+        if self.noise_z_check is not None:
+            circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise_z_check)
+        if self.noise_x_check is not None:
+            circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise_x_check)
+
+        # Detect changes.
+        circuit.append("MR", self.z_check_qubits)
+        for k in range(len(self.z_check_qubits)):
+            circuit.append(
+                "DETECTOR",
+                [
+                    stim.target_rec(-1 - k),
+                    stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                ],
+            )
+        circuit.append("MR", self.x_check_qubits)
+        for k in range(len(self.x_check_qubits)):
+            circuit.append(
+                "DETECTOR",
+                [
+                    stim.target_rec(-1 - k),
+                    stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                ],
+            )
+
+        self.circuit += circuit * self.rounds
+
+        self.circuit.append("M", self.data_qubits)
+        num_data_qubits_z = scale[1] // 2 + 1
+        num_data_qubits_x = scale[1] // 2
+        row = 0
+        skip = 0
+        # TODO: Check this for different scales.
+        for k in range(len(self.z_check_qubits)):
+            if k % num_data_qubits_x == 0 and k != 0:
+                row += 2
+                skip += num_data_qubits_z
+            lookback_records = [
+                stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
+                stim.target_rec(-1 - k - skip),
+                stim.target_rec(-2 - k - skip),
+            ]
+            if row == 0:
+                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+            elif row == scale[0] - 1:
+                lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
+            else:
+                lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
+                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+
+            self.circuit.append("DETECTOR", lookback_records)
+
+        skip = 0
+        # TODO: Check this for different scales.
+        for k in range(len(self.x_check_qubits)):
+            lookback_records = []
+            if k % num_data_qubits_z == 0:
+                if k != 0:
+                    skip += num_data_qubits_x
+                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+            elif k % num_data_qubits_z == num_data_qubits_z - 1:
+                lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
+            else:
+                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
+
+            lookback_records += [
+                stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
+                stim.target_rec(-1 - k - skip),
+                stim.target_rec(-2 - k - skip),
+            ]
+
+            self.circuit.append("DETECTOR", lookback_records)
+
+        observable_lookback_records = []
+        skip = 0
+        # TODO: Check this for different scales.
+        # For the Z memory experiment.
+        for k in range(len(self.x_check_qubits)):
+            if k % num_data_qubits_z == 0 and k != 0:
+                skip += num_data_qubits_x
+            if k % num_data_qubits_z == num_data_qubits_z - 1:
+                observable_lookback_records.append(stim.target_rec(-1 - k - skip))
+        observable_lookback_records.append(stim.target_rec(-2 - k - skip))
+
+        self.circuit.append("OBSERVABLE_INCLUDE", [stim.target_rec(-1)], 0)
+
+    def _repetition_code(self) -> None:
+        distance = self.code_params["distance"]
+
         # We have to add initial dummy measurements for the detector to detect change in the first
         # set of qubit measurements.
-        self.circuit.append("M", self.check_qubits)
+        self.circuit.append("M", self.z_check_qubits)
 
         circuit = stim.Circuit()
 
         # Stabilizer measurements.
-        for m in self.check_qubits:
+        for m in self.z_check_qubits:
             circuit.append("CNOT", [m - 1, m])
             circuit.append("CNOT", [m + 1, m])
             if self.noise_circuit is not None:
@@ -172,14 +372,14 @@ class StabilizerModel:
         # Apply random errors on qubits.
         if self.noise_data is not None:
             circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
-        if self.noise_check is not None:
-            circuit.append("PAULI_CHANNEL_1", self.check_qubits, self.noise_check)
+        if self.noise_z_check is not None:
+            circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise_z_check)
 
         # This measures and resets (to zero) the check qubits.
-        circuit.append("MR", self.check_qubits)
+        circuit.append("MR", self.z_check_qubits)
 
         # Compare the last measurement result to the one previous to that of the same qubit.
-        for k in range(len(self.check_qubits)):
+        for k in range(len(self.z_check_qubits)):
             circuit.append(
                 "DETECTOR", [stim.target_rec(-1 - k), stim.target_rec(-1 - k - distance)]
             )
@@ -189,7 +389,7 @@ class StabilizerModel:
 
         # Measure data qubits at the end.
         self.circuit.append("M", self.data_qubits)
-        for k in range(len(self.check_qubits)):
+        for k in range(len(self.z_check_qubits)):
             self.circuit.append(
                 "DETECTOR",
                 [
@@ -199,5 +399,5 @@ class StabilizerModel:
                 ],
             )
 
-        # Measure observable (?)
+        # Add observable.
         self.circuit.append("OBSERVABLE_INCLUDE", [stim.target_rec(-1)], 0)
