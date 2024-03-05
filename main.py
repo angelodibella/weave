@@ -1,7 +1,7 @@
 import model
 
 rep_model = model.StabilizerModel(
-    "repetition",
+    "repetition_code",
     distance=15,
     rounds=10,
     noise_circuit=0.0,
@@ -16,3 +16,6 @@ rep_model.display_samples()
 rep_model.display_detector_samples()
 
 rep_model.circuit.diagram()
+
+import sinter
+sinter.Task

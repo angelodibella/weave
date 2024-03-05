@@ -30,7 +30,7 @@ class StabilizerModel:
         self.z_check_qubits = []
         self.x_check_qubits = []
 
-        if type(noise_circuit) is float:
+        if np.issubdtype(type(noise_circuit), np.number):
             self.noise_circuit = [noise_circuit / 15 for _ in range(15)]
         else:
             assert (
@@ -38,7 +38,7 @@ class StabilizerModel:
             ), f"Stabilizer measurement noise takes 15 parameters, given {len(noise_circuit)}."
             self.noise_circuit = noise_circuit
 
-        if type(noise_data) is float:
+        if np.issubdtype(type(noise_data), np.number):
             self.noise_data = [noise_data / 3 for _ in range(3)]
         else:
             assert (
@@ -46,7 +46,7 @@ class StabilizerModel:
             ), f"Data qubit noise takes 3 parameters, given {len(noise_data)}."
             self.noise_data = noise_data
 
-        if type(noise_z_check) is float:
+        if np.issubdtype(type(noise_z_check), np.number):
             self.noise_z_check = [noise_z_check / 3 for _ in range(3)]
         else:
             assert (
@@ -54,7 +54,7 @@ class StabilizerModel:
             ), f"Z check qubit noise takes 3 parameters, given {len(noise_z_check)}."
             self.noise_z_check = noise_z_check
 
-        if type(noise_x_check) is float:
+        if np.issubdtype(type(noise_x_check), np.number):
             self.noise_x_check = [noise_x_check / 3 for _ in range(3)]
         else:
             assert (
@@ -63,14 +63,15 @@ class StabilizerModel:
             self.noise_x_check = noise_x_check
 
         self.code_params: dict = kwargs
-        match code:
-            case "repetition":
+        main_code, subcode = code.split(":")
+        match main_code:
+            case "repetition_code":
                 distance = self.code_params["distance"]
                 self.qubits = np.arange(2 * distance + 1)
                 self.data_qubits = self.qubits[::2]
                 self.z_check_qubits = self.qubits[1::2]
                 self._repetition_code()
-            case "surface":
+            case "surface_code":
                 scale = self.code_params["scale"]
                 assert (
                     scale[0] % 2 != 0 and scale[1] % 2 != 0
@@ -94,7 +95,7 @@ class StabilizerModel:
                                 self.data_qubits.append(curr_qubit)
                             else:
                                 self.x_check_qubits.append(curr_qubit)
-                self._surface_code()
+                self._surface_code(subcode)
             case _:
                 raise ValueError("Code not recognized.")
 
@@ -151,20 +152,25 @@ class StabilizerModel:
         round_list = [marker if outcome else "_" for outcome in sample]
         return np.reshape(round_list, (effective_rounds, len(sample) // effective_rounds))
 
-    def print(self) -> None:
-        print(self.circuit, "\n")
-
-    # TODO: Decode with BP-OSD, and see if this accounts for the FULL error model.
+    # def print(self) -> None:
+    #     print(self.circuit, "\n")
 
     # ------------------------------------------- Codes -------------------------------------------
 
-    # def hypergraph_product_code(self, H1: np.array, H2: np.array) -> None:
-    #     self.qubits = np.arange()
-    #     HX, HZ = generate_hypergraph_pcm(H1, H2)
+    def hypergraph_product_code(self, H1: np.array, H2: np.array) -> None:
+        self.qubits = np.arange()
+        HX, HZ = generate_hypergraph_pcm(H1, H2)
+        """TODO:
+            z_pairings: {(i, j) : list[tuple]} instead of hard-coding qubit positions for sparse codes likd HP code.
+            
+        """
 
-    def _surface_code(self) -> None:
+    def _surface_code(self, subcode: str) -> None:
         scale = self.code_params["scale"]
+        
+        self.circuit.append("R", self.qubits)
 
+        # TODO: See to remove this.
         self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)
 
         # Check and noise.
@@ -178,12 +184,12 @@ class StabilizerModel:
                     circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
 
                     if row == 0:
-                        circuit.append("CNOT", [curr_qubit + scale[0], curr_qubit])
+                        circuit.append("CNOT", [curr_qubit + scale[1], curr_qubit])
                     elif row == scale[0] - 1:
-                        circuit.append("CNOT", [curr_qubit - scale[0], curr_qubit])
+                        circuit.append("CNOT", [curr_qubit - scale[1], curr_qubit])
                     else:
-                        circuit.append("CNOT", [curr_qubit - scale[0], curr_qubit])
-                        circuit.append("CNOT", [curr_qubit + scale[0], curr_qubit])
+                        circuit.append("CNOT", [curr_qubit - scale[1], curr_qubit])
+                        circuit.append("CNOT", [curr_qubit + scale[1], curr_qubit])
 
                     # Gate noise.
                     if self.noise_circuit is not None:
@@ -196,24 +202,24 @@ class StabilizerModel:
                         if row == 0:
                             circuit.append(
                                 "PAULI_CHANNEL_2",
-                                [curr_qubit + scale[0], curr_qubit],
+                                [curr_qubit + scale[1], curr_qubit],
                                 self.noise_circuit,
                             )
                         elif row == scale[0] - 1:
                             circuit.append(
                                 "PAULI_CHANNEL_2",
-                                [curr_qubit - scale[0], curr_qubit],
+                                [curr_qubit - scale[1], curr_qubit],
                                 self.noise_circuit,
                             )
                         else:
                             circuit.append(
                                 "PAULI_CHANNEL_2",
-                                [curr_qubit - scale[0], curr_qubit],
+                                [curr_qubit - scale[1], curr_qubit],
                                 self.noise_circuit,
                             )
                             circuit.append(
                                 "PAULI_CHANNEL_2",
-                                [curr_qubit + scale[0], curr_qubit],
+                                [curr_qubit + scale[1], curr_qubit],
                                 self.noise_circuit,
                             )
 
@@ -221,8 +227,8 @@ class StabilizerModel:
                     # X check and boundary conditions.
                     circuit.append("H", [curr_qubit])
 
-                    circuit.append("CNOT", [curr_qubit - scale[0], curr_qubit])
-                    circuit.append("CNOT", [curr_qubit + scale[0], curr_qubit])
+                    circuit.append("CNOT", [curr_qubit - scale[1], curr_qubit])
+                    circuit.append("CNOT", [curr_qubit + scale[1], curr_qubit])
                     if col == 0:
                         circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
                     elif col == scale[1] - 1:
@@ -238,12 +244,12 @@ class StabilizerModel:
                     if self.noise_circuit is not None:
                         circuit.append(
                             "PAULI_CHANNEL_2",
-                            [curr_qubit - scale[0], curr_qubit],
+                            [curr_qubit - scale[1], curr_qubit],
                             self.noise_circuit,
                         )
                         circuit.append(
                             "PAULI_CHANNEL_2",
-                            [curr_qubit + scale[0], curr_qubit],
+                            [curr_qubit + scale[1], curr_qubit],
                             self.noise_circuit,
                         )
                         if col == 0:
@@ -272,23 +278,26 @@ class StabilizerModel:
 
         # Detect changes.
         circuit.append("MR", self.z_check_qubits)
-        for k in range(len(self.z_check_qubits)):
-            circuit.append(
-                "DETECTOR",
-                [
-                    stim.target_rec(-1 - k),
-                    stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
-                ],
-            )
-        circuit.append("MR", self.x_check_qubits)
-        for k in range(len(self.x_check_qubits)):
-            circuit.append(
-                "DETECTOR",
-                [
-                    stim.target_rec(-1 - k),
-                    stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
-                ],
-            )
+        if subcode == "z_memory":
+            for k in range(len(self.z_check_qubits)):
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(-1 - k),
+                        stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                    ],
+                )
+            circuit.append("MR", self.x_check_qubits)
+        elif subcode == "x_memory":
+            circuit.append("MR", self.x_check_qubits)
+            for k in range(len(self.x_check_qubits)):
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(-1 - k),
+                        stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                    ],
+                )
 
         self.circuit += circuit * self.rounds
 
@@ -297,60 +306,58 @@ class StabilizerModel:
         num_data_qubits_x = scale[1] // 2
         row = 0
         skip = 0
-        # TODO: Check this for different scales.
-        for k in range(len(self.z_check_qubits)):
-            if k % num_data_qubits_x == 0 and k != 0:
-                row += 2
-                skip += num_data_qubits_z
-            lookback_records = [
-                stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
-                stim.target_rec(-1 - k - skip),
-                stim.target_rec(-2 - k - skip),
+        if subcode == "z_memory":
+            for k in range(len(self.z_check_qubits)):
+                if k % num_data_qubits_x == 0 and k != 0:
+                    row += 2
+                    skip += num_data_qubits_z
+                lookback_records = [
+                    stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
+                    stim.target_rec(-1 - k - skip),
+                    stim.target_rec(-2 - k - skip),
+                ]
+                if row == 0:
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                elif row == scale[0] - 1:
+                    lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
+                else:
+                    lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                self.circuit.append("DETECTOR", lookback_records)
+        elif subcode == "x_memory":
+            for k in range(len(self.x_check_qubits)):
+                lookback_records = []
+                if k % num_data_qubits_z == 0:
+                    if k != 0:
+                        skip += num_data_qubits_x
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                elif k % num_data_qubits_z == num_data_qubits_z - 1:
+                    lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
+                else:
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                    lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
+
+                lookback_records += [
+                    stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
+                    stim.target_rec(-1 - k - skip),
+                    stim.target_rec(-2 - k - skip),
+                ]
+                self.circuit.append("DETECTOR", lookback_records)
+
+        observable_lookback_indices = []
+        if subcode == "z_memory":
+            for k in range(scale[0] // 2 + 1):
+                observable_lookback_indices.append(
+                    stim.target_rec(
+                        -k * (num_data_qubits_z + num_data_qubits_x) - num_data_qubits_z
+                    )
+                )
+        elif subcode == "x_memory":
+            observable_lookback_indices = [
+                stim.target_rec(-1 - k) for k in range(num_data_qubits_z)
             ]
-            if row == 0:
-                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
-            elif row == scale[0] - 1:
-                lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
-            else:
-                lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
-                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
 
-            self.circuit.append("DETECTOR", lookback_records)
-
-        skip = 0
-        # TODO: Check this for different scales.
-        for k in range(len(self.x_check_qubits)):
-            lookback_records = []
-            if k % num_data_qubits_z == 0:
-                if k != 0:
-                    skip += num_data_qubits_x
-                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
-            elif k % num_data_qubits_z == num_data_qubits_z - 1:
-                lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
-            else:
-                lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
-                lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
-
-            lookback_records += [
-                stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
-                stim.target_rec(-1 - k - skip),
-                stim.target_rec(-2 - k - skip),
-            ]
-
-            self.circuit.append("DETECTOR", lookback_records)
-
-        observable_lookback_records = []
-        skip = 0
-        # TODO: Check this for different scales.
-        # For the Z memory experiment.
-        for k in range(len(self.x_check_qubits)):
-            if k % num_data_qubits_z == 0 and k != 0:
-                skip += num_data_qubits_x
-            if k % num_data_qubits_z == num_data_qubits_z - 1:
-                observable_lookback_records.append(stim.target_rec(-1 - k - skip))
-        observable_lookback_records.append(stim.target_rec(-2 - k - skip))
-
-        self.circuit.append("OBSERVABLE_INCLUDE", [stim.target_rec(-1)], 0)
+        self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
 
     def _repetition_code(self) -> None:
         distance = self.code_params["distance"]
