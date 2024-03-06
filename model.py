@@ -1,13 +1,68 @@
 import numpy as np
 import stim
+from itertools import combinations
 
 
-def generate_hypergraph_pcm(H1: np.ndarray, H2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def hypergraph_pcm(H1: np.ndarray, H2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     r1, n1 = H1.shape
     r2, n2 = H2.shape
     HX = np.append(np.kron(H1, np.eye(n2)), np.kron(np.eye(r1), H2.T), axis=1)
     HZ = np.append(np.kron(np.eye(n1), H2), np.kron(H1.T, np.eye(r2)), axis=1)
-    return HX, HZ
+
+    return HX.astype(int), HZ.astype(int)
+
+
+def classical_pcm(clist: list) -> np.ndarray:
+    num_bits = clist.count("B")
+    H = []
+    for i in range(len(clist)):
+        if clist[i] == "C":
+            peak_i = i + 1
+            one_hot_vec = np.zeros(num_bits)
+            while peak_i < len(clist) and type(clist[peak_i]) != str:
+                one_hot_vec[clist[peak_i]] = 1
+                peak_i += 1
+            H.append(one_hot_vec)
+
+    return np.array(H, dtype=int)
+
+
+def intersecting_edges(
+    adjacency_matrix: np.ndarray, positions: dict[int, tuple[float, float]]
+) -> set[frozenset[tuple[float, float]]]:
+    # Generate list of edges.
+    edges = []
+    for i in range(len(adjacency_matrix)):
+        for j in range(i + 1, len(adjacency_matrix)):
+            if adjacency_matrix[i, j] == 1:
+                edges.append((i, j))
+
+    # Function to check if lines intersect.
+    def ccw(A, B, C):
+        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+    def do_lines_intersect(line1, line2):
+        A, B = line1
+        C, D = line2
+        return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+    # Find all sets of two edges that intersect.
+    intersecting_edges = set()
+    for edge1, edge2 in combinations(edges, 2):
+        line1 = (positions[edge1[0]], positions[edge1[1]])
+        line2 = (positions[edge2[0]], positions[edge2[1]])
+        if do_lines_intersect(line1, line2):
+            intersecting_edges.add(frozenset((edge1, edge2)))
+
+    # Remove pairs where the edges share a node, because they can't intersect in a plane graph.
+    non_intersecting_pairs = set()
+    for pair in intersecting_edges:
+        edge1, edge2 = pair
+        if len(set(edge1) & set(edge2)) != 0:
+            non_intersecting_pairs.add(pair)
+    intersecting_edges -= non_intersecting_pairs
+
+    return intersecting_edges
 
 
 class StabilizerModel:
@@ -63,7 +118,7 @@ class StabilizerModel:
             self.noise_x_check = noise_x_check
 
         self.code_params: dict = kwargs
-        main_code, subcode = code.split(":")
+        main_code, subcode = code.split(":") if ":" in code else (code, None)
         match main_code:
             case "repetition_code":
                 distance = self.code_params["distance"]
@@ -96,6 +151,43 @@ class StabilizerModel:
                             else:
                                 self.x_check_qubits.append(curr_qubit)
                 self._surface_code(subcode)
+            case "hypergraph_product_code":
+                """TODO:
+                z_pairings: {(i, j) : list[tuple]} instead of hard-coding qubit positions; for sparse codes like the HP code.
+                """
+                clist1 = self.code_params["clist1"]
+                clist2 = self.code_params["clist2"]
+                H1 = classical_pcm(clist1)
+                H2 = classical_pcm(clist2)
+
+                num_qubits = sum(H1.shape) * sum(H2.shape)
+                self.qubits = np.arange(num_qubits)
+
+                z_check_order = [
+                    "Q" if s == "B" else "Z"
+                    for s in clist2
+                    if not np.issubdtype(type(s), np.number)
+                ]
+
+                x_check_order = [
+                    "X" if s == "B" else "Q"
+                    for s in clist2
+                    if not np.issubdtype(type(s), np.number)
+                ]
+
+                check_order = np.array(
+                    [
+                        z_check_order if s == "B" else x_check_order
+                        for s in clist1
+                        if not np.issubdtype(type(s), np.number)
+                    ]
+                ).flatten()
+
+                self.data_qubits = [q for q, s in zip(self.qubits, check_order) if s == "Q"]
+                self.z_check_qubits = [q for q, s in zip(self.qubits, check_order) if s == "Z"]
+                self.x_check_qubits = [q for q, s in zip(self.qubits, check_order) if s == "X"]
+
+                self._hypergraph_product_code()
             case _:
                 raise ValueError("Code not recognized.")
 
@@ -152,22 +244,26 @@ class StabilizerModel:
         round_list = [marker if outcome else "_" for outcome in sample]
         return np.reshape(round_list, (effective_rounds, len(sample) // effective_rounds))
 
-    # def print(self) -> None:
-    #     print(self.circuit, "\n")
+    def print(self) -> None:
+        print(self.circuit, "\n")
 
     # ------------------------------------------- Codes -------------------------------------------
 
-    def hypergraph_product_code(self, H1: np.array, H2: np.array) -> None:
-        self.qubits = np.arange()
-        HX, HZ = generate_hypergraph_pcm(H1, H2)
-        """TODO:
-            z_pairings: {(i, j) : list[tuple]} instead of hard-coding qubit positions for sparse codes likd HP code.
-            
-        """
+    def _hypergraph_product_code(self) -> None:
+        qubit_pos = self.code_params["pos"]
+        
+        clist1 = self.code_params["clist1"]
+        clist2 = self.code_params["clist2"]
+        H1 = classical_pcm(clist1)
+        H2 = classical_pcm(clist2)
+        HX, HZ = hypergraph_pcm(H1, H2)
+        print(HZ)
+        print()
+        print(HX)
 
     def _surface_code(self, subcode: str) -> None:
         scale = self.code_params["scale"]
-        
+
         self.circuit.append("R", self.qubits)
 
         # TODO: See to remove this.
