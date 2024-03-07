@@ -124,6 +124,15 @@ def intersecting_edges(
     return intersecting_edges
 
 
+def strip(s: str) -> int:
+    s_int = ""
+    for c in s:
+        if c.isdigit():
+            s_int += c
+    
+    return int(s_int)
+
+
 class StabilizerModel:
     def __init__(
         self,
@@ -307,19 +316,8 @@ class StabilizerModel:
     def print(self) -> None:
         print(self.circuit, "\n")
 
-    # def draw(self, pos: bool = True, **kwargs) -> None:
-    #     """Colors nodes based on their type ('q', 'x', 'z') and plots the graph."""
-    #     colors = {"q": "#D3D3D3", "X": "#FFC0CB", "Z": "#ADD8E6"}
-    #     node_colors = [colors[node[1]] for node in self.graph.nodes()]
-
-    #     # shapes = {"q": "o", "X": "s", "Z": "s"}
-    #     # node_shapes = [shapes[node[1]] for node in self.graph.nodes()]
-
-    #     pos = nx.spring_layout(self.graph)
-    #     nx.draw(self.graph, pos, node_color=node_colors, node_size=700, **kwargs)
-
     def draw(
-        self, with_labels: bool = False, pos: dict | None = None, crossings: bool = True, **kwargs
+        self, with_labels: bool = False, layout: str = None, crossings: bool = True, **kwargs
     ) -> None:
         """Colors nodes based on their type ('q', 'x', 'z') and plots the graph."""
 
@@ -327,15 +325,28 @@ class StabilizerModel:
         shapes = {"q": "o", "X": "s", "Z": "s"}
         sizes = {"q": 300, "X": 230, "Z": 230}
 
-        # TODO: Add node positions.
-        if pos is None:
-            pos = nx.spring_layout(self.graph)
+        if layout == "spring":
+            layout = nx.spring_layout(self.graph, iterations=5000)
+        elif layout == "random":
+            layout = nx.random_layout(self.graph)
+        elif layout is None:
+            pos = self.code_params["pos"]
+            layout = {}
+            for node in self.graph.nodes():
+                if node[1] == "q":
+                    layout[node] = pos[self.data_qubits[strip(node) - 1]]
+                if node[1] == "X":
+                    layout[node] = pos[self.x_check_qubits[strip(node) - 1]]
+                if node[1] == "Z":
+                    layout[node] = pos[self.z_check_qubits[strip(node) - 1]]
+        else:
+            raise ValueError(f"Qubit layout not recognized: `{layout}`.")
 
         for node_type, shape in shapes.items():
             filtered_nodes = [node for node in self.graph.nodes() if node[1] == node_type]
             nx.draw_networkx_nodes(
                 self.graph,
-                pos,
+                layout,
                 nodelist=filtered_nodes,
                 node_color=[colors[node_type] for _ in filtered_nodes],
                 node_shape=shape,
@@ -343,17 +354,17 @@ class StabilizerModel:
                 **kwargs,
             )
 
-        nx.draw_networkx_edges(self.graph, pos)
+        nx.draw_networkx_edges(self.graph, layout, width=0.7)
         if with_labels:
             labels = {node: node for node in self.graph.nodes()}
-            nx.draw_networkx_labels(self.graph, pos, labels)
+            nx.draw_networkx_labels(self.graph, layout, labels)
 
         plt.axis("off")
 
     # ------------------------------------------- Codes -------------------------------------------
 
     def _hypergraph_product_code(self, experiment: str | None) -> None:
-        qubit_pos = self.code_params["pos"]
+        pos = self.code_params["pos"]
 
         self.circuit.append("R", self.qubits)
         self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)  # Maybe...
