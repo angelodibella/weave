@@ -3,11 +3,38 @@ import stim
 from itertools import combinations
 
 
-def hypergraph_pcm(H1: np.ndarray, H2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def hypergraph_pcm(
+    H1: np.ndarray, H2: np.ndarray, reordered: bool = True
+) -> tuple[np.ndarray, np.ndarray]:
     r1, n1 = H1.shape
     r2, n2 = H2.shape
-    HX = np.append(np.kron(H1, np.eye(n2)), np.kron(np.eye(r1), H2.T), axis=1)
-    HZ = np.append(np.kron(np.eye(n1), H2), np.kron(H1.T, np.eye(r2)), axis=1)
+
+    HX_left = np.kron(H1, np.eye(n2))
+    HX_right = np.kron(np.eye(r1), H2.T)
+    HX = np.append(HX_left, HX_right, axis=1)
+
+    HZ_left = np.kron(np.eye(n1), H2)
+    HZ_right = np.kron(H1.T, np.eye(r2))
+    HZ = np.append(HZ_left, HZ_right, axis=1)
+
+    if reordered:
+        HX_left_split = np.split(HX_left, n1, axis=1)
+        HX_right_split = np.split(HX_right, r1, axis=1)
+        HX_split = []
+        for i in range(n1):
+            HX_split.append(HX_left_split[i])
+            if i < r1:
+                HX_split.append(HX_right_split[i])
+        HX = np.concatenate(tuple(HX_split), axis=1)
+
+        HZ_left_split = np.split(HZ_left, n1, axis=1)
+        HZ_right_split = np.split(HZ_right, r1, axis=1)
+        HZ_split = []
+        for i in range(n1):
+            HZ_split.append(HZ_left_split[i])
+            if i < r1:
+                HZ_split.append(HZ_right_split[i])
+        HZ = np.concatenate(tuple(HZ_split), axis=1)
 
     return HX.astype(int), HZ.astype(int)
 
@@ -118,7 +145,7 @@ class StabilizerModel:
             self.noise_x_check = noise_x_check
 
         self.code_params: dict = kwargs
-        main_code, subcode = code.split(":") if ":" in code else (code, None)
+        main_code, experiment = code.split(":") if ":" in code else (code, None)
         match main_code:
             case "repetition_code":
                 distance = self.code_params["distance"]
@@ -150,11 +177,8 @@ class StabilizerModel:
                                 self.data_qubits.append(curr_qubit)
                             else:
                                 self.x_check_qubits.append(curr_qubit)
-                self._surface_code(subcode)
+                self._surface_code(experiment)
             case "hypergraph_product_code":
-                """TODO:
-                z_pairings: {(i, j) : list[tuple]} instead of hard-coding qubit positions; for sparse codes like the HP code.
-                """
                 clist1 = self.code_params["clist1"]
                 clist2 = self.code_params["clist2"]
                 H1 = classical_pcm(clist1)
@@ -187,11 +211,12 @@ class StabilizerModel:
                 self.z_check_qubits = [q for q, s in zip(self.qubits, check_order) if s == "Z"]
                 self.x_check_qubits = [q for q, s in zip(self.qubits, check_order) if s == "X"]
 
-                self._hypergraph_product_code()
+                self._hypergraph_product_code(experiment)
             case _:
-                raise ValueError("Code not recognized.")
+                raise ValueError(f"Code not recognized: '{main_code}'.")
 
-        # TODO: Implement X and Z error propagation analysis
+        # TODO: Implement X and Z error propagation analysis.
+        # TODO: Implement single-gate noise, like for Hadamard gates in X stabilizer syndrome extraction.
 
     # ------------------------------------ Setters and Getters ------------------------------------
 
@@ -249,27 +274,114 @@ class StabilizerModel:
 
     # ------------------------------------------- Codes -------------------------------------------
 
-    def _hypergraph_product_code(self) -> None:
+    def _hypergraph_product_code(self, experiment: str | None) -> None:
         qubit_pos = self.code_params["pos"]
-        
+
+        self.circuit.append("R", self.qubits)
+        self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)  # Maybe...
+
         clist1 = self.code_params["clist1"]
         clist2 = self.code_params["clist2"]
         H1 = classical_pcm(clist1)
         H2 = classical_pcm(clist2)
         HX, HZ = hypergraph_pcm(H1, H2)
-        print(HZ)
-        print()
-        print(HX)
 
-    def _surface_code(self, subcode: str) -> None:
+        circuit = stim.Circuit()
+        for target_qubit, z_pcm_row in zip(self.z_check_qubits, HZ):
+            qubits = [self.data_qubits[i] for i, v in enumerate(z_pcm_row) if v]
+            for qubit in qubits:
+                circuit.append("CNOT", [qubit, target_qubit])
+                if self.noise_circuit is not None:
+                    circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
+
+        for target_qubit, x_pcm_row in zip(self.x_check_qubits, HX):
+            qubits = [self.data_qubits[i] for i, v in enumerate(x_pcm_row) if v]
+            for qubit in qubits:
+                circuit.append("H", [target_qubit])
+                circuit.append("CNOT", [qubit, target_qubit])
+                circuit.append("H", [target_qubit])
+                if self.noise_circuit is not None:
+                    circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
+
+        if self.noise_data is not None:
+            circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
+        if self.noise_z_check is not None:
+            circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise_z_check)
+        if self.noise_x_check is not None:
+            circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise_x_check)
+
+        circuit.append("MR", self.z_check_qubits)
+        if experiment == "z_memory":
+            for k in range(len(self.z_check_qubits)):
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(-1 - k),
+                        stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                    ],
+                )
+            circuit.append("MR", self.x_check_qubits)
+        elif experiment == "x_memory":
+            circuit.append("MR", self.x_check_qubits)
+            for k in range(len(self.x_check_qubits)):
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(-1 - k),
+                        stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                    ],
+                )
+        elif experiment is None:
+            # TODO: Add detectors.
+            pass
+        else:
+            raise ValueError(f"Experiment not recognized: '{experiment}'.")
+
+        self.circuit += circuit * self.rounds
+        self.circuit.append("M", self.data_qubits)
+
+        if experiment == "z_memory":
+            for k in range(len(self.z_check_qubits)):
+                z_pcm_row = HZ[-1 - k]
+                idx_qubits = [i for i, v in enumerate(z_pcm_row) if v]
+                lookback_records = [
+                    stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits))
+                ]
+                for idx_qubit in idx_qubits:
+                    lookback_records.append(stim.target_rec(idx_qubit - len(self.data_qubits)))
+                self.circuit.append("DETECTOR", lookback_records)
+        elif experiment == "x_memory":
+            for k in range(len(self.x_check_qubits)):
+                x_pcm_row = HX[-1 - k]
+                idx_qubits = [i for i, v in enumerate(x_pcm_row) if v]
+                lookback_records = [stim.target_rec(-1 - k - len(self.data_qubits))]
+                for idx_qubit in idx_qubits:
+                    lookback_records.append(stim.target_rec(idx_qubit - len(self.data_qubits)))
+                self.circuit.append("DETECTOR", lookback_records)
+        elif experiment is None:
+            # TODO: Add detectors.
+            pass
+
+        observable_lookback_indices = []
+        if experiment == "z_memory":
+            for k in range(H1.shape[1]):
+                observable_lookback_indices.append(
+                    stim.target_rec(-k * (H2.shape[0] + H2.shape[1]) - H2.shape[1])
+                )
+            self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
+        elif experiment == "x_memory":
+            observable_lookback_indices = [stim.target_rec(-1 - k) for k in range(H2.shape[1])]
+            self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
+        elif experiment is None:
+            # TODO: Add observable.
+            pass
+
+    def _surface_code(self, experiment: str | None) -> None:
         scale = self.code_params["scale"]
 
         self.circuit.append("R", self.qubits)
+        self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)  # Maybe...
 
-        # TODO: See to remove this.
-        self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)
-
-        # Check and noise.
         circuit = stim.Circuit()
         for row in range(scale[0]):
             for col in range(scale[1]):
@@ -364,7 +476,6 @@ class StabilizerModel:
                                 "PAULI_CHANNEL_2", [curr_qubit + 1, curr_qubit], self.noise_circuit
                             )
 
-        # Qubit noise.
         if self.noise_data is not None:
             circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
         if self.noise_z_check is not None:
@@ -372,9 +483,8 @@ class StabilizerModel:
         if self.noise_x_check is not None:
             circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise_x_check)
 
-        # Detect changes.
         circuit.append("MR", self.z_check_qubits)
-        if subcode == "z_memory":
+        if experiment == "z_memory":
             for k in range(len(self.z_check_qubits)):
                 circuit.append(
                     "DETECTOR",
@@ -384,7 +494,7 @@ class StabilizerModel:
                     ],
                 )
             circuit.append("MR", self.x_check_qubits)
-        elif subcode == "x_memory":
+        elif experiment == "x_memory":
             circuit.append("MR", self.x_check_qubits)
             for k in range(len(self.x_check_qubits)):
                 circuit.append(
@@ -394,15 +504,36 @@ class StabilizerModel:
                         stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
                     ],
                 )
+        elif experiment is None:
+            for k in range(len(self.z_check_qubits)):
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(-1 - k),
+                        stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                    ],
+                )
+
+            circuit.append("MR", self.x_check_qubits)
+            for k in range(len(self.x_check_qubits)):
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(-1 - k),
+                        stim.target_rec(-1 - k - len(self.x_check_qubits + self.z_check_qubits)),
+                    ],
+                )
+        else:
+            raise ValueError(f"Experiment not recognized: '{experiment}'.")
 
         self.circuit += circuit * self.rounds
-
         self.circuit.append("M", self.data_qubits)
+
         num_data_qubits_z = scale[1] // 2 + 1
         num_data_qubits_x = scale[1] // 2
         row = 0
         skip = 0
-        if subcode == "z_memory":
+        if experiment == "z_memory":
             for k in range(len(self.z_check_qubits)):
                 if k % num_data_qubits_x == 0 and k != 0:
                     row += 2
@@ -420,7 +551,45 @@ class StabilizerModel:
                     lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
                     lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
                 self.circuit.append("DETECTOR", lookback_records)
-        elif subcode == "x_memory":
+        elif experiment == "x_memory":
+            for k in range(len(self.x_check_qubits)):
+                lookback_records = []
+                if k % num_data_qubits_z == 0:
+                    if k != 0:
+                        skip += num_data_qubits_x
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                elif k % num_data_qubits_z == num_data_qubits_z - 1:
+                    lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
+                else:
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                    lookback_records.append(stim.target_rec(-1 - k - skip - num_data_qubits_x))
+
+                lookback_records += [
+                    stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
+                    stim.target_rec(-1 - k - skip),
+                    stim.target_rec(-2 - k - skip),
+                ]
+                self.circuit.append("DETECTOR", lookback_records)
+        elif experiment is None:
+            # TODO: Start here for x and z experiment combined. See why this does not work.
+            for k in range(len(self.z_check_qubits)):
+                if k % num_data_qubits_x == 0 and k != 0:
+                    row += 2
+                    skip += num_data_qubits_z
+                lookback_records = [
+                    stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits)),
+                    stim.target_rec(-1 - k - skip),
+                    stim.target_rec(-2 - k - skip),
+                ]
+                if row == 0:
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                elif row == scale[0] - 1:
+                    lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
+                else:
+                    lookback_records.append(stim.target_rec(-1 - k - skip + num_data_qubits_x))
+                    lookback_records.append(stim.target_rec(-2 - k - skip - num_data_qubits_x))
+                self.circuit.append("DETECTOR", lookback_records)
+
             for k in range(len(self.x_check_qubits)):
                 lookback_records = []
                 if k % num_data_qubits_z == 0:
@@ -441,19 +610,32 @@ class StabilizerModel:
                 self.circuit.append("DETECTOR", lookback_records)
 
         observable_lookback_indices = []
-        if subcode == "z_memory":
+        if experiment == "z_memory":
             for k in range(scale[0] // 2 + 1):
                 observable_lookback_indices.append(
                     stim.target_rec(
                         -k * (num_data_qubits_z + num_data_qubits_x) - num_data_qubits_z
                     )
                 )
-        elif subcode == "x_memory":
+            self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
+        elif experiment == "x_memory":
             observable_lookback_indices = [
                 stim.target_rec(-1 - k) for k in range(num_data_qubits_z)
             ]
-
-        self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
+            self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
+        elif experiment is None:
+            z_observable_lookback_indices = []
+            for k in range(scale[0] // 2 + 1):
+                z_observable_lookback_indices.append(
+                    stim.target_rec(
+                        -k * (num_data_qubits_z + num_data_qubits_x) - num_data_qubits_z
+                    )
+                )
+            x_observable_lookback_indices = [
+                stim.target_rec(-1 - k) for k in range(num_data_qubits_z)
+            ]
+            self.circuit.append("OBSERVABLE_INCLUDE", z_observable_lookback_indices, 0)
+            self.circuit.append("OBSERVABLE_INCLUDE", x_observable_lookback_indices, 1)
 
     def _repetition_code(self) -> None:
         distance = self.code_params["distance"]
