@@ -50,4 +50,11 @@ print(rep_pcm, "\n")
 
 hp_pcm = model.hypergraph_pcm(rep_pcm, hamming_pcm)
 print(hp_pcm[0], "\n")
-print(hp_pcm[1])
+print(hp_pcm[1], "\n\n")
+
+clist_rep_2 = ["B", "C", 0, 1, "B"]
+H1 = H2 = model.classical_pcm(clist_rep_2)
+print(H1, "\n")
+HX, HZ = model.hypergraph_pcm(H1, H2)
+
+print(model.hypergraph_adjacency_matrix(HX, HZ))
