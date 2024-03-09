@@ -194,12 +194,49 @@ class StabilizerModel:
     def print(self) -> None:
         print(self.circuit, "\n")
 
+    def node_to_qubit(self, node: str) -> int:
+        def strip(s: str) -> int:
+            s_int = ""
+            for c in s:
+                if c.isdigit():
+                    s_int += c
+
+            return int(s_int)
+
+        if node[1] == "q":
+            return self.data_qubits[strip(node) - 1]
+        elif node[1] == "X":
+            return self.x_check_qubits[strip(node) - 1]
+        elif node[1] == "Z":
+            return self.z_check_qubits[strip(node) - 1]
+
+    def crossings(self) -> set[frozenset[tuple[int, int]]]:
+        def ccw(A, B, C):
+            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+        def intersect(A, B, C, D):
+            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+        crossings = set()
+        qubit_edges = [tuple(map(self.node_to_qubit, edge)) for edge in self.graph.edges]
+        for i in range(len(qubit_edges)):
+            for j in range(i + 1, len(qubit_edges)):
+                qubit_edge_1, qubit_edge_2 = qubit_edges[i], qubit_edges[j]
+                if qubit_edge_1[0] in qubit_edge_2 or qubit_edge_1[1] in qubit_edge_2:
+                    continue
+
+                pos1 = (self.pos[qubit_edge_1[0]], self.pos[qubit_edge_1[1]])
+                pos2 = (self.pos[qubit_edge_2[0]], self.pos[qubit_edge_2[1]])
+                if intersect(pos1[0], pos1[1], pos2[0], pos2[1]):
+                    crossings.add(frozenset({qubit_edge_1, qubit_edge_2}))
+        return crossings
+
     def draw(
         self,
         with_labels: bool = False,
         layout: str = None,
         crossings: bool = True,
-        connection_rad: float = 0,
+        connection_rad: float = 0.0,
         **kwargs,
     ) -> None:
         """Colors nodes based on their type ('q', 'x', 'z') and plots the graph."""
@@ -215,12 +252,8 @@ class StabilizerModel:
         elif layout is None:
             layout = {}
             for node in self.graph.nodes():
-                if node[1] == "q":
-                    layout[node] = self.pos[self.data_qubits[util.strip(node) - 1]]
-                if node[1] == "X":
-                    layout[node] = self.pos[self.x_check_qubits[util.strip(node) - 1]]
-                if node[1] == "Z":
-                    layout[node] = self.pos[self.z_check_qubits[util.strip(node) - 1]]
+                qubit = self.node_to_qubit(node)
+                layout[node] = self.pos[qubit]
         else:
             raise ValueError(f"Qubit layout not recognized: `{layout}`.")
 
@@ -243,20 +276,29 @@ class StabilizerModel:
             labels = {node: node for node in self.graph.nodes()}
             nx.draw_networkx_labels(self.graph, layout, labels)
 
-        # if crossings:
-        #     # Assuming self.graph is a nx.Graph where nodes are integers and self.pos is a dict mapping node indices to positions
-        #     adjacency_matrix = nx.to_numpy_array(self.graph, dtype=int)
-        #     intersecting_pairs = util.intersecting_edges(adjacency_matrix, self.pos)
+        if crossings:
+            crossing_sets = self.crossings()
+            for crossing in crossing_sets:
+                qubit_edge_1, qubit_edge_2 = list(crossing)
+                line1 = np.array([self.pos[qubit_edge_1[0]], self.pos[qubit_edge_1[1]]])
+                line2 = np.array([self.pos[qubit_edge_2[0]], self.pos[qubit_edge_2[1]]])
 
-        #     # Draw intersecting edges
-        #     for pair in intersecting_pairs:
-        #         edge1, edge2 = pair
-        #         for edge in [edge1, edge2]:
-        #             # Unpack nodes from each edge
-        #             start, end = edge
-        #             # Draw a line for the edge with a specific color to indicate intersection
-        #             line = [layout[start], layout[end]]
-        #             plt.plot(*zip(*line), color="red", linestyle="--", linewidth=2, alpha=0.5)
+                # Line 1 equation: A1x + B1y = C1
+                A1 = line1[1, 1] - line1[0, 1]
+                B1 = line1[0, 0] - line1[1, 0]
+                C1 = A1 * line1[0, 0] + B1 * line1[0, 1]
+
+                # Line 2 equation: A2x + B2y = C2
+                A2 = line2[1, 1] - line2[0, 1]
+                B2 = line2[0, 0] - line2[1, 0]
+                C2 = A2 * line2[0, 0] + B2 * line2[0, 1]
+
+                determinant = A1 * B2 - A2 * B1
+
+                if determinant != 0:
+                    x = (C1 * B2 - C2 * B1) / determinant
+                    y = (A1 * C2 - A2 * C1) / determinant
+                    plt.scatter(x, y, color="black", s=15, marker="D")
 
         plt.axis("off")
 
