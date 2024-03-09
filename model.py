@@ -15,6 +15,7 @@ class StabilizerModel:
         circuit: stim.Circuit = None,
         rounds: int = 3,
         noise_circuit: float | list[float] = 0.0,
+        noise_crossing: float | list[float] = 0.0,
         noise_data: float | list[float] = 0.0,
         noise_z_check: float | list[float] = 0.0,
         noise_x_check: float | list[float] = 0.0,
@@ -46,6 +47,14 @@ class StabilizerModel:
                 len(noise_data) == 3
             ), f"Data qubit noise takes 3 parameters, given {len(noise_data)}."
             self.noise_data = noise_data
+
+        if np.issubdtype(type(noise_crossing), np.number):
+            self.noise_crossing = [noise_crossing / 15 for _ in range(15)]
+        else:
+            assert (
+                len(noise_crossing) == 15
+            ), f"Crossing noise takes 15 parameters, given {len(noise_crossing)}."
+            self.noise_circuit = noise_crossing
 
         if np.issubdtype(type(noise_z_check), np.number):
             self.noise_z_check = [noise_z_check / 3 for _ in range(3)]
@@ -146,6 +155,8 @@ class StabilizerModel:
         # TODO: Change to `set_data_qubits` and have it set the data qubits generally.
         self.circuit.append("R", self.data_qubits)
 
+    # TODO: Create distance getter.
+    
     # -------------------------------------- Utility Methods --------------------------------------
 
     def display_samples(self, shots: int = 1) -> None:
@@ -305,8 +316,6 @@ class StabilizerModel:
     # ------------------------------------------- Codes -------------------------------------------
 
     def _hypergraph_product_code(self, experiment: str | None) -> None:
-        # TODO: Add crossings with `self.pos`.
-
         self.circuit.append("R", self.qubits)
         self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)  # Maybe...
 
@@ -321,8 +330,7 @@ class StabilizerModel:
             qubits = [self.data_qubits[i] for i, v in enumerate(z_pcm_row) if v]
             for qubit in qubits:
                 circuit.append("CNOT", [qubit, target_qubit])
-                if self.noise_circuit is not None:
-                    circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
+                circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
 
         for target_qubit, x_pcm_row in zip(self.x_check_qubits, HX):
             qubits = [self.data_qubits[i] for i, v in enumerate(x_pcm_row) if v]
@@ -330,15 +338,16 @@ class StabilizerModel:
                 circuit.append("H", [target_qubit])
                 circuit.append("CNOT", [qubit, target_qubit])
                 circuit.append("H", [target_qubit])
-                if self.noise_circuit is not None:
-                    circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
+                circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
+        
+        crossings = self.crossings()
+        for crossing in crossings:
+            for edge in crossing:
+                circuit.append("PAULI_CHANNEL_2", [edge[0], edge[1]], self.noise_crossing)
 
-        if self.noise_data is not None:
-            circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
-        if self.noise_z_check is not None:
-            circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise_z_check)
-        if self.noise_x_check is not None:
-            circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise_x_check)
+        circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
+        circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise_z_check)
+        circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise_x_check)
 
         circuit.append("MR", self.z_check_qubits)
         if experiment == "z_memory":
