@@ -19,6 +19,7 @@ class StabilizerModel:
         noise_data: float | list[float] = 0.0,
         noise_z_check: float | list[float] = 0.0,
         noise_x_check: float | list[float] = 0.0,
+        logical_index: int = 0,
         **kwargs,
     ) -> None:
         self.circuit = stim.Circuit() if circuit is None else circuit
@@ -71,6 +72,8 @@ class StabilizerModel:
                 len(noise_x_check) == 3
             ), f"Data qubit noise takes 3 parameters, given {len(noise_z_check)}."
             self.noise_x_check = noise_x_check
+
+        self.logical_index = logical_index
 
         self.code_params: dict = kwargs
         main_code, experiment = code.split(":") if ":" in code else (code, None)
@@ -156,8 +159,8 @@ class StabilizerModel:
         self.circuit.append("R", self.data_qubits)
 
     # TODO: Create distance getter.
-    
-    # -------------------------------------- Utility Methods --------------------------------------
+
+    # -------------------------------------- Display Methods --------------------------------------
 
     def display_samples(self, shots: int = 1) -> None:
         samples = self.circuit.compile_sampler().sample(shots)
@@ -189,58 +192,8 @@ class StabilizerModel:
             print(f"Shot {i + 1}:\n" + "".join(round_list))
         print()
 
-    def shot(self, detector: bool = True) -> None:
-        # TODO: Update.
-        sample = (
-            self.circuit.compile_detector_sampler() if detector else self.circuit.compile_sampler()
-        ).sample(1)[0]
-
-        # Account for dummy measurement when using detectors.
-        effective_rounds = self.rounds if detector else self.rounds + 1
-
-        marker = "x" if detector else "o"
-        round_list = [marker if outcome else "_" for outcome in sample]
-        return np.reshape(round_list, (effective_rounds, len(sample) // effective_rounds))
-
     def print(self) -> None:
         print(self.circuit, "\n")
-
-    def node_to_qubit(self, node: str) -> int:
-        def strip(s: str) -> int:
-            s_int = ""
-            for c in s:
-                if c.isdigit():
-                    s_int += c
-
-            return int(s_int)
-
-        if node[1] == "q":
-            return self.data_qubits[strip(node) - 1]
-        elif node[1] == "X":
-            return self.x_check_qubits[strip(node) - 1]
-        elif node[1] == "Z":
-            return self.z_check_qubits[strip(node) - 1]
-
-    def crossings(self) -> set[frozenset[tuple[int, int]]]:
-        def ccw(A, B, C):
-            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
-
-        def intersect(A, B, C, D):
-            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
-
-        crossings = set()
-        qubit_edges = [tuple(map(self.node_to_qubit, edge)) for edge in self.graph.edges]
-        for i in range(len(qubit_edges)):
-            for j in range(i + 1, len(qubit_edges)):
-                qubit_edge_1, qubit_edge_2 = qubit_edges[i], qubit_edges[j]
-                if qubit_edge_1[0] in qubit_edge_2 or qubit_edge_1[1] in qubit_edge_2:
-                    continue
-
-                pos1 = (self.pos[qubit_edge_1[0]], self.pos[qubit_edge_1[1]])
-                pos2 = (self.pos[qubit_edge_2[0]], self.pos[qubit_edge_2[1]])
-                if intersect(pos1[0], pos1[1], pos2[0], pos2[1]):
-                    crossings.add(frozenset({qubit_edge_1, qubit_edge_2}))
-        return crossings
 
     def draw(
         self,
@@ -313,6 +266,45 @@ class StabilizerModel:
 
         plt.axis("off")
 
+    # --------------------------------------- Graph Methods ---------------------------------------
+
+    def node_to_qubit(self, node: str) -> int:
+        def strip(s: str) -> int:
+            s_int = ""
+            for c in s:
+                if c.isdigit():
+                    s_int += c
+
+            return int(s_int)
+
+        if node[1] == "q":
+            return self.data_qubits[strip(node) - 1]
+        elif node[1] == "X":
+            return self.x_check_qubits[strip(node) - 1]
+        elif node[1] == "Z":
+            return self.z_check_qubits[strip(node) - 1]
+
+    def crossings(self) -> set[frozenset[tuple[int, int]]]:
+        def ccw(A, B, C):
+            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+        def intersect(A, B, C, D):
+            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+        crossings = set()
+        qubit_edges = [tuple(map(self.node_to_qubit, edge)) for edge in self.graph.edges]
+        for i in range(len(qubit_edges)):
+            for j in range(i + 1, len(qubit_edges)):
+                qubit_edge_1, qubit_edge_2 = qubit_edges[i], qubit_edges[j]
+                if qubit_edge_1[0] in qubit_edge_2 or qubit_edge_1[1] in qubit_edge_2:
+                    continue
+
+                pos1 = (self.pos[qubit_edge_1[0]], self.pos[qubit_edge_1[1]])
+                pos2 = (self.pos[qubit_edge_2[0]], self.pos[qubit_edge_2[1]])
+                if intersect(pos1[0], pos1[1], pos2[0], pos2[1]):
+                    crossings.add(frozenset({qubit_edge_1, qubit_edge_2}))
+        return crossings
+
     # ------------------------------------------- Codes -------------------------------------------
 
     def _hypergraph_product_code(self, experiment: str | None) -> None:
@@ -339,7 +331,7 @@ class StabilizerModel:
                 circuit.append("CNOT", [qubit, target_qubit])
                 circuit.append("H", [target_qubit])
                 circuit.append("PAULI_CHANNEL_2", [qubit, target_qubit], self.noise_circuit)
-        
+
         crossings = self.crossings()
         for crossing in crossings:
             for edge in crossing:
@@ -403,13 +395,26 @@ class StabilizerModel:
 
         observable_lookback_indices = []
         if experiment == "z_memory":
+            if self.logical_index >= H2.shape[1]:
+                raise ValueError(
+                    f"Logical index cannot exceed or be equal to the second code's number "
+                    f"of data qubits, {H2.shape[1]}, in a Z-memory experiment: given {self.logical_index}."
+                )
             for k in range(H1.shape[1]):
                 observable_lookback_indices.append(
-                    stim.target_rec(-k * (H2.shape[0] + H2.shape[1]) - H2.shape[1])
+                    stim.target_rec(-k * sum(H2.shape) - H2.shape[1] + self.logical_index)
                 )
             self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
         elif experiment == "x_memory":
-            observable_lookback_indices = [stim.target_rec(-1 - k) for k in range(H2.shape[1])]
+            if self.logical_index >= H1.shape[1]:
+                raise ValueError(
+                    f"Logical index cannot exceed or be equal to the first code's number "
+                    f"of data qubits, {H1.shape[1]}, in an X-memory experiment: given {self.logical_index}."
+                )
+            observable_lookback_indices = [
+                stim.target_rec(-1 - k - self.logical_index * sum(H2.shape))
+                for k in range(H2.shape[1])
+            ]
             self.circuit.append("OBSERVABLE_INCLUDE", observable_lookback_indices, 0)
         elif experiment is None:
             # TODO: Add observable.
