@@ -1,8 +1,10 @@
-import numpy as np
-import networkx as nx
-import matplotlib.pyplot as plt
-
 from itertools import combinations
+
+import matplotlib.pyplot as plt
+import numpy as np
+import sympy
+
+from ldpc import mod2
 
 
 def hypergraph_pcm(
@@ -54,3 +56,31 @@ def classical_pcm(clist: list) -> np.ndarray:
             H.append(one_hot_vec)
 
     return np.array(H, dtype=int)
+
+
+def find_pivot_columns(matrix: np.ndarray) -> list[int]:
+    rows, cols = matrix.shape
+    pivot_columns = []
+
+    row_index = 0
+    for col_index in range(cols):
+        found_pivot = False
+        for i in range(row_index, rows):
+            if matrix[i, col_index] == 1:
+                pivot_columns.append(col_index)
+                found_pivot = True
+
+                if i != row_index:
+                    matrix[[i, row_index]] = matrix[[row_index, i]]
+
+                for j in range(rows):
+                    if j != row_index and matrix[j, col_index] == 1:
+                        matrix[j] = (matrix[j] + matrix[row_index]) % 2
+
+                row_index += 1
+                break
+
+        if not found_pivot:
+            continue
+
+    return pivot_columns
