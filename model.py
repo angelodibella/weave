@@ -411,12 +411,13 @@ class StabilizerModel:
 
         for target_qubit, x_pcm_row in zip(self.x_check_qubits, self.HX):
             qubits = [self.data_qubits[i] for i, v in enumerate(x_pcm_row) if v]
-            for z_logical_qubit in qubits:
+            for x_logical_qubit in qubits:
+                # TODO: Experiment with taking Hadamard gates out of this loop, and/or using CZ gates.
                 circuit.append("H", [target_qubit])
-                circuit.append("CNOT", [z_logical_qubit, target_qubit])
+                circuit.append("CNOT", [target_qubit, x_logical_qubit])
                 circuit.append("H", [target_qubit])
                 circuit.append(
-                    "PAULI_CHANNEL_2", [z_logical_qubit, target_qubit], self.noise_circuit
+                    "PAULI_CHANNEL_2", [x_logical_qubit, target_qubit], self.noise_circuit
                 )
 
         crossings = self.crossings()
@@ -554,18 +555,17 @@ class StabilizerModel:
                     # X check and boundary conditions.
                     circuit.append("H", [curr_qubit])
 
-                    circuit.append("CNOT", [curr_qubit - self.scale[1], curr_qubit])
-                    circuit.append("CNOT", [curr_qubit + self.scale[1], curr_qubit])
+                    circuit.append("CNOT", [curr_qubit, curr_qubit - self.scale[1]])
+                    circuit.append("CNOT", [curr_qubit, curr_qubit + self.scale[1]])
                     if col == 0:
-                        circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
+                        circuit.append("CNOT", [curr_qubit, curr_qubit + 1])
                     elif col == self.scale[1] - 1:
-                        circuit.append("CNOT", [curr_qubit - 1, curr_qubit])
+                        circuit.append("CNOT", [curr_qubit, curr_qubit - 1])
                     else:
-                        circuit.append("CNOT", [curr_qubit - 1, curr_qubit])
-                        circuit.append("CNOT", [curr_qubit + 1, curr_qubit])
+                        circuit.append("CNOT", [curr_qubit, curr_qubit - 1])
+                        circuit.append("CNOT", [curr_qubit, curr_qubit + 1])
 
                     circuit.append("H", [curr_qubit])
-                    # TODO: Apply noise after Hadamard gates.
 
                     # Gate noise.
                     if self.noise_circuit is not None:
