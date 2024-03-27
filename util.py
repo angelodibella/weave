@@ -6,6 +6,38 @@ import numpy as np
 from ldpc import mod2
 
 
+def generate_rep_pcm(n: int) -> np.ndarray:
+    H = np.zeros((n - 1, n), dtype=int)
+    np.fill_diagonal(H, 1)
+    H[:, -1] = 1
+
+    return H
+
+
+def generate_hamming_pcm(n: int) -> np.ndarray:
+    m = int(np.ceil(np.log2(n + 1)))
+    if 2**m - 1 != n:
+        raise ValueError("Invalid n for a Hamming code. Ensure n = 2^m - 1.")
+
+    H = np.zeros((m, n), dtype=int)
+    for i in range(1, n + 1):
+        binary_str = format(i, f"0{m}b")[::-1]
+        H[:, i - 1] = [int(bit) for bit in binary_str]
+
+    return H
+
+
+def pcm_to_clist(H: np.ndarray) -> list:
+    clist = ["B"] * H.shape[1]
+    for row in H:
+        clist.append("C")
+        for i, col in enumerate(row):
+            if col == 1:
+                clist.append(i)
+
+    return clist
+
+
 def hypergraph_pcm(
     H1: np.ndarray, H2: np.ndarray, reordered: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
