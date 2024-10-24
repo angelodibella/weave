@@ -11,17 +11,17 @@ import util
 
 class StabilizerModel:
     def __init__(
-        self,
-        code: str,
-        circuit: stim.Circuit = None,
-        rounds: int = 3,
-        noise_circuit: float | list[float] = 0.0,
-        noise_crossing: float | list[float] = 0.0,
-        noise_data: float | list[float] = 0.0,
-        noise_z_check: float | list[float] = 0.0,
-        noise_x_check: float | list[float] = 0.0,
-        logical: int | list[int] = None,
-        **kwargs,
+            self,
+            code: str,
+            circuit: stim.Circuit = None,
+            rounds: int = 3,
+            noise_circuit: float | list[float] = 0.0,
+            noise_crossing: float | list[float] = 0.0,
+            noise_data: float | list[float] = 0.0,
+            noise_z_check: float | list[float] = 0.0,
+            noise_x_check: float | list[float] = 0.0,
+            logical: int | list[int] = None,
+            **kwargs,
     ) -> None:
         self.circuit = stim.Circuit() if circuit is None else circuit
         self.rounds = rounds
@@ -38,7 +38,7 @@ class StabilizerModel:
             self.noise_circuit = [noise_circuit / 15 for _ in range(15)]
         else:
             assert (
-                len(noise_circuit) == 15
+                    len(noise_circuit) == 15
             ), f"Stabilizer measurement noise takes 15 parameters, given {len(noise_circuit)}."
             self.noise_circuit = noise_circuit
 
@@ -46,7 +46,7 @@ class StabilizerModel:
             self.noise_data = [noise_data / 3 for _ in range(3)]
         else:
             assert (
-                len(noise_data) == 3
+                    len(noise_data) == 3
             ), f"Data qubit noise takes 3 parameters, given {len(noise_data)}."
             self.noise_data = noise_data
 
@@ -54,7 +54,7 @@ class StabilizerModel:
             self.noise_crossing = [noise_crossing / 15 for _ in range(15)]
         else:
             assert (
-                len(noise_crossing) == 15
+                    len(noise_crossing) == 15
             ), f"Crossing noise takes 15 parameters, given {len(noise_crossing)}."
             self.noise_circuit = noise_crossing
 
@@ -62,7 +62,7 @@ class StabilizerModel:
             self.noise_z_check = [noise_z_check / 3 for _ in range(3)]
         else:
             assert (
-                len(noise_z_check) == 3
+                    len(noise_z_check) == 3
             ), f"Z check qubit noise takes 3 parameters, given {len(noise_z_check)}."
             self.noise_z_check = noise_z_check
 
@@ -70,7 +70,7 @@ class StabilizerModel:
             self.noise_x_check = [noise_x_check / 3 for _ in range(3)]
         else:
             assert (
-                len(noise_x_check) == 3
+                    len(noise_x_check) == 3
             ), f"Data qubit noise takes 3 parameters, given {len(noise_z_check)}."
             self.noise_x_check = noise_x_check
 
@@ -89,7 +89,7 @@ class StabilizerModel:
             case "surface_code":
                 self.scale = self.code_params["scale"]
                 assert (
-                    self.scale[0] % 2 != 0 and self.scale[1] % 2 != 0
+                        self.scale[0] % 2 != 0 and self.scale[1] % 2 != 0
                 ), "Scale of the surface code must be odd."
 
                 self.qubits = np.arange(self.scale[0] * self.scale[1])
@@ -228,11 +228,11 @@ class StabilizerModel:
         print(self.circuit, "\n")
 
     def draw(
-        self,
-        with_labels: bool = False,
-        crossings: bool = True,
-        connection_rad: float = 0.0,
-        **kwargs,
+            self,
+            with_labels: bool = False,
+            crossings: bool = True,
+            connection_rad: float = 0.0,
+            **kwargs,
     ) -> None:
         """Colors nodes based on their type ('q', 'x', 'z') and plots the graph."""
 
@@ -334,7 +334,7 @@ class StabilizerModel:
 
             G.nodes[i]["layer"] = 0
         for i in range(
-            num_data_qubits + num_z_checks, num_data_qubits + num_z_checks + num_x_checks
+                num_data_qubits + num_z_checks, num_data_qubits + num_z_checks + num_x_checks
         ):
             G.nodes[i]["type"] = "X"
             G.nodes[i]["index"] = self.x_check_qubits[i - (num_data_qubits + num_z_checks)]
