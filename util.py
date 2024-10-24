@@ -16,7 +16,7 @@ def generate_rep_pcm(n: int) -> np.ndarray:
 
 def generate_hamming_pcm(n: int) -> np.ndarray:
     m = int(np.ceil(np.log2(n + 1)))
-    if 2**m - 1 != n:
+    if 2 ** m - 1 != n:
         raise ValueError("Invalid n for a Hamming code. Ensure n = 2^m - 1.")
 
     H = np.zeros((m, n), dtype=int)
@@ -39,7 +39,7 @@ def pcm_to_clist(H: np.ndarray) -> list:
 
 
 def hypergraph_pcm(
-    H1: np.ndarray, H2: np.ndarray, reordered: bool = True
+        H1: np.ndarray, H2: np.ndarray, reordered: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
     r1, n1 = H1.shape
     r2, n2 = H2.shape
