@@ -1,5 +1,5 @@
 __pycache__/
-temp_results/
 .ipynb_checkpoints/
 .vscode/
 .idea/
+.venv/
