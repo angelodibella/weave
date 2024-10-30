@@ -4,8 +4,7 @@ import numpy as np
 import stim
 from ldpc import mod2
 
-import util
-
+from weave import util
 
 class StabilizerModel:
     def __init__(
