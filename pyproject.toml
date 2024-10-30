@@ -14,6 +14,8 @@ stimbposd = "^0.0.1"
 stim = "^1.14.0"
 sympy = "^1.13.3"
 ldpc = "^0.1.53"
+networkx = "^3.4.2"
+notebook = "^7.2.2"
 
 
 [build-system]
