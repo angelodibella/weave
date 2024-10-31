@@ -1,5 +1,5 @@
-from .model import StabilizerModel
+from .code import Code
 
 __all__ = [
-    'StabilizerModel',
+    'Code',
 ]
