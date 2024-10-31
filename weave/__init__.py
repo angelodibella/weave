@@ -1,1 +1,6 @@
-from .model import StabilizerModel
+from .codes import StabilizerModel
+from .util import pcm
+
+__all__ = [
+    'StabilizerModel',
+]

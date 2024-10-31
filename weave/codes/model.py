@@ -4,7 +4,8 @@ import numpy as np
 import stim
 from ldpc import mod2
 
-from weave import util
+import weave as wv
+
 
 class StabilizerModel:
     def __init__(
@@ -116,8 +117,8 @@ class StabilizerModel:
                 clist1 = self.code_params["clist1"]
                 clist2 = self.code_params["clist2"]
 
-                self.H1: np.ndarray = util.classical_pcm(clist1)
-                self.H2: np.ndarray = util.classical_pcm(clist2)
+                self.H1: np.ndarray = wv.pcm.to_matrix(clist1)
+                self.H2: np.ndarray = wv.pcm.to_matrix(clist2)
 
                 num_qubits = sum(self.H1.shape) * sum(self.H2.shape)
                 self.qubits = np.arange(num_qubits)
@@ -146,7 +147,7 @@ class StabilizerModel:
                 self.z_check_qubits = [q for q, s in zip(self.qubits, check_order) if s == "Z"]
                 self.x_check_qubits = [q for q, s in zip(self.qubits, check_order) if s == "X"]
 
-                self.HX, self.HZ = util.hypergraph_pcm(self.H1, self.H2)
+                self.HX, self.HZ = wv.pcm.hypergraph(self.H1, self.H2)
                 self.graph = self.construct_graph()
                 if self.pos is None or type(self.pos) == str:
                     self.pos_from_str()

@@ -1,12 +1,7 @@
-from itertools import combinations
-
-import matplotlib.pyplot as plt
 import numpy as np
 
-from ldpc import mod2
 
-
-def generate_rep_pcm(n: int) -> np.ndarray:
+def repetition(n: int) -> np.ndarray:
     H = np.zeros((n - 1, n), dtype=int)
     np.fill_diagonal(H, 1)
     H[:, -1] = 1
@@ -14,7 +9,7 @@ def generate_rep_pcm(n: int) -> np.ndarray:
     return H
 
 
-def generate_hamming_pcm(n: int) -> np.ndarray:
+def hamming(n: int) -> np.ndarray:
     m = int(np.ceil(np.log2(n + 1)))
     if 2 ** m - 1 != n:
         raise ValueError("Invalid n for a Hamming code. Ensure n = 2^m - 1.")
@@ -27,18 +22,7 @@ def generate_hamming_pcm(n: int) -> np.ndarray:
     return H
 
 
-def pcm_to_clist(H: np.ndarray) -> list:
-    clist = ["B"] * H.shape[1]
-    for row in H:
-        clist.append("C")
-        for i, col in enumerate(row):
-            if col == 1:
-                clist.append(i)
-
-    return clist
-
-
-def hypergraph_pcm(
+def hypergraph(
         H1: np.ndarray, H2: np.ndarray, reordered: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
     r1, n1 = H1.shape
@@ -74,7 +58,18 @@ def hypergraph_pcm(
     return HX.astype(int), HZ.astype(int)
 
 
-def classical_pcm(clist: list) -> np.ndarray:
+def to_clist(H: np.ndarray) -> list:
+    clist = ["B"] * H.shape[1]
+    for row in H:
+        clist.append("C")
+        for i, col in enumerate(row):
+            if col == 1:
+                clist.append(i)
+
+    return clist
+
+
+def to_matrix(clist: list) -> np.ndarray:
     num_bits = clist.count("B")
     H = []
     for i in range(len(clist)):
