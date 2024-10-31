@@ -7,7 +7,7 @@ from ldpc import mod2
 import weave as wv
 
 
-class StabilizerModel:
+class Code:
     def __init__(
             self,
             code: str,
