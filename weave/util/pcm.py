@@ -22,7 +22,7 @@ def hamming(n: int) -> np.ndarray:
     return H
 
 
-def hypergraph(
+def hypergraph_product(
         H1: np.ndarray, H2: np.ndarray, reordered: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
     r1, n1 = H1.shape
