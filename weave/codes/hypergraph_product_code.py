@@ -4,10 +4,11 @@ import numpy as np
 import stim
 from ldpc import mod2
 
-from .base import Code
+from .base import StabilizerCode
 from ..util import pcm
 
-class HypergraphProductCode(Code):
+
+class HypergraphProductCode(StabilizerCode):
     def __init__(
             self,
             clist1: list,
@@ -19,8 +20,7 @@ class HypergraphProductCode(Code):
         self.H1: np.ndarray = pcm.to_matrix(clist1)
         self.H2: np.ndarray = pcm.to_matrix(clist2)
 
-        num_qubits = sum(self.H1.shape) * sum(self.H2.shape)
-        self.qubits = np.arange(num_qubits)
+        self.qubits = np.arange(sum(self.H1.shape) * sum(self.H2.shape))
 
         z_check_order = [
             "Q" if s == "B" else "Z"
@@ -57,13 +57,7 @@ class HypergraphProductCode(Code):
         # TODO: Implement X and Z error propagation analysis.
         # TODO: Implement single-gate noise, like for Hadamard gates in X stabilizer syndrome extraction.
 
-    def reset_data_qubits(self) -> None:
-        self.circuit.append("R", self.data_qubits)
-
-    def crossing_number(self) -> int:
-        return len(self.crossings)
-
-    def logicals(self):
+    def find_logicals(self):
         def compute_lz(HX, HZ):
             ker_HX = mod2.nullspace(HX)
             im_HZ_T = mod2.row_basis(HZ)
@@ -81,9 +75,6 @@ class HypergraphProductCode(Code):
         z_logicals = compute_lz(self.HX, self.HZ)
 
         return x_logicals, z_logicals
-
-    def print(self) -> None:
-        print(self.circuit, "\n")
 
     def draw(
             self,
@@ -201,30 +192,6 @@ class HypergraphProductCode(Code):
 
         return G
 
-    def find_crossings(self) -> set[frozenset[tuple[int, int]]]:
-        # TODO: Put these methods into a math module in util.
-        def ccw(A, B, C):
-            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
-
-        def intersect(A, B, C, D):
-            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
-
-        crossings = set()
-        qubit_edges = [
-            tuple(self.graph.nodes[node]["index"] for node in edge) for edge in self.graph.edges
-        ]
-        for i in range(len(qubit_edges)):
-            for j in range(i + 1, len(qubit_edges)):
-                qubit_edge_1, qubit_edge_2 = qubit_edges[i], qubit_edges[j]
-                if qubit_edge_1[0] in qubit_edge_2 or qubit_edge_1[1] in qubit_edge_2:
-                    continue
-
-                pos1 = (self.pos[qubit_edge_1[0]], self.pos[qubit_edge_1[1]])
-                pos2 = (self.pos[qubit_edge_2[0]], self.pos[qubit_edge_2[1]])
-                if intersect(pos1[0], pos1[1], pos2[0], pos2[1]):
-                    crossings.add(frozenset({qubit_edge_1, qubit_edge_2}))
-        return crossings
-
     def construct_code(self) -> None:
         self.circuit.append("R", self.qubits)
         self.circuit.append("M", self.z_check_qubits + self.x_check_qubits)
@@ -235,7 +202,7 @@ class HypergraphProductCode(Code):
             for z_logical_qubit in qubits:
                 circuit.append("CNOT", [z_logical_qubit, target_qubit])
                 circuit.append(
-                    "PAULI_CHANNEL_2", [z_logical_qubit, target_qubit], self.noise_circuit
+                    "PAULI_CHANNEL_2", [z_logical_qubit, target_qubit], self.noise.circuit
                 )
 
         for target_qubit, x_pcm_row in zip(self.x_check_qubits, self.HX):
@@ -246,16 +213,16 @@ class HypergraphProductCode(Code):
                 circuit.append("CNOT", [target_qubit, x_logical_qubit])
                 circuit.append("H", [target_qubit])
                 circuit.append(
-                    "PAULI_CHANNEL_2", [x_logical_qubit, target_qubit], self.noise_circuit
+                    "PAULI_CHANNEL_2", [x_logical_qubit, target_qubit], self.noise.circuit
                 )
 
         for crossing in self.crossings:
             for edge in crossing:
-                circuit.append("PAULI_CHANNEL_2", [edge[0], edge[1]], self.noise_crossing)
+                circuit.append("PAULI_CHANNEL_2", [edge[0], edge[1]], self.noise.crossing)
 
-        circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise_data)
-        circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise_z_check)
-        circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise_x_check)
+        circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise.data)
+        circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise.z_check)
+        circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise.x_check)
 
         circuit.append("MR", self.z_check_qubits)
         if self.experiment == "z_memory":
@@ -303,7 +270,7 @@ class HypergraphProductCode(Code):
                     lookback_records.append(stim.target_rec(idx_qubit - len(self.data_qubits)))
                 self.circuit.append("DETECTOR", lookback_records)
 
-        x_logicals, z_logicals = self.logicals()
+        x_logicals, z_logicals = self.find_logicals()
         x_logicals_qubits = [np.where(logical == 1)[0] for logical in x_logicals]
         z_logicals_qubits = [np.where(logical == 1)[0] for logical in z_logicals]
 
