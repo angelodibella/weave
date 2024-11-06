@@ -1,7 +1,8 @@
-from .base import Code
+from .base import NoiseModel, StabilizerCode
 from .hypergraph_product_code import HypergraphProductCode
 
 __all__ = [
-    "Code",
+    "NoiseModel",
+    "StabilizerCode",
     "HypergraphProductCode",
 ]
