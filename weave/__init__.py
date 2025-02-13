@@ -1,8 +1,8 @@
-from .codes import NoiseModel, StabilizerCode, HypergraphProductCode
+from .codes import NoiseModel, CSSCode, HypergraphProductCode
 from .util import pcm
 
 __all__ = [
     "NoiseModel",
-    "StabilizerCode",
+    "CSSCode",
     "HypergraphProductCode",
 ]
