@@ -3,22 +3,28 @@ name = "weave"
 version = "0.2.0-alpha"
 description = "A quantum error correction framework that can implement and visualize qubit cross-talk."
 authors = [
-    {name = "angelo",email = "angelo.dibella2020@gmail.com"}
+    { name = "angelo", email = "angelo.dibella2020@gmail.com" }
 ]
+license = { text = "MIT" }
 readme = "README.md"
 requires-python = "^3.10"
 dependencies = [
-    "numpy (>=1.26.4,<2.0.0)",
-    "matplotlib (>=3.9.2)",
-    "sinter (>=1.14.0)",
-    "stimbposd (>=0.0.1)",
-    "stim (>=1.14.0)",
-    "sympy (>=1.13.3)",
-    "ldpc (>=0.1.53)",
-    "networkx (>=3.4.2)",
-    "notebook (>=7.2.2)"
+    "numpy >=1.26.4, <2.0.0",
+    "matplotlib >=3.9.2",
+    "sinter >=1.14.0",
+    "stimbposd >=0.0.1",
+    "stim >=1.14.0",
+    "sympy >=1.13.3",
+    "ldpc >=0.1.53",
+    "networkx >=3.4.2",
+    "notebook >=7.2.2"
 ]
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.4"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+
