@@ -2,86 +2,79 @@ import numpy as np
 
 
 class NoiseModel:
-    """Class encapsulating noise models for quantum error-correcting codes.
-    
-    Attributes
+    """
+    Noise model for quantum error-correcting codes.
+
+    Parameters
     ----------
-    data : float or list of float
-        Noise level(s) for data qubits. This is the list of probabilities of applying, respectively, 'X', 'Y' and 'Z'
-        Pauli gates to data qubits. If a single number is passed, then this value represents the probability of applying
-        any of these errors uniformly. Defaults to zero.
-    z_check : float or list of float
-        Noise level(s) for Z-check qubits. Similar to `data`. Defaults to zero.
-    x_check : float or list of float
-        Noise level(s) for X-check qubits. Similar to `data`. Defaults to zero.
-    circuit : float or list of float
-        Noise level(s) for the circuit operations. Respectively, the probability of assigning, to two-qubit gates,
-        combination pairs of Pauli I, X, Y and Z operators in the following order:
-
-        [IX, IY, IZ, XI, XX, XY, XZ, YI, YX, YY, YZ, ZI, ZX, ZY, ZZ]
-
-        except the operator 'II', which is determined by subtracting the sum of this list of probabilities from 1. If a
-        single number is passed, then this value represents the probability of applying any of these non-trivial errors
-        uniformly. Defaults to zero.
-    crossing : float or list of float
-        Noise level(s) for crossing edges of the Tanner graph of the code. Behaves exactly the same as `circuit`, where
-        the two-qubit errors are applied on qubits that cross-talk. Defaults to zero.
+    data : float or list of float, optional
+        Noise level(s) for data qubits. If a single float is provided, it is uniformly divided among 3 error types.
+        Default is 0.0.
+    z_check : float or list of float, optional
+        Noise level(s) for Z-check qubits. If a single float is provided, it is uniformly divided among 3 error types.
+        Default is 0.0.
+    x_check : float or list of float, optional
+        Noise level(s) for X-check qubits. If a single float is provided, it is uniformly divided among 3 error types.
+        Default is 0.0.
+    circuit : float or list of float, optional
+        Noise level(s) for two-qubit circuit operations. Expected to be 15 values. If a single float is provided,
+        it is uniformly divided among 15 values. Default is 0.0.
+    crossing : float or list of float, optional
+        Noise level(s) for crossing edges (cross-talk) in the Tanner graph. Expected to be 15 values. If a single float
+        is provided, it is uniformly divided among 15 values. Default is 0.0.
 
     Raises
     ------
     AssertionError
-        If the provided noise parameter lists do not have the expected lengths.
+        If any noise parameter provided as a list does not have the expected length.
     """
-
     def __init__(
-            self,
-            data: float | list[float] = 0.0,
-            z_check: float | list[float] = 0.0,
-            x_check: float | list[float] = 0.0,
-            circuit: float | list[float] = 0.0,
-            crossing: float | list[float] = 0.0,
+        self,
+        data: float | list[float] = 0.0,
+        z_check: float | list[float] = 0.0,
+        x_check: float | list[float] = 0.0,
+        circuit: float | list[float] = 0.0,
+        crossing: float | list[float] = 0.0,
     ) -> None:
-        if np.issubdtype(type(circuit), np.number):
-            self.circuit = [circuit / 15 for _ in range(15)]
-        else:
-            assert (
-                    len(circuit) == 15
-            ), f"Stabilizer measurement noise takes 15 parameters, given {len(circuit)}."
-            self.circuit = circuit
+        self.circuit = self._process_noise(circuit, expected=15, name="Circuit", divisor=15)
+        self.data = self._process_noise(data, expected=3, name="Data qubit", divisor=3)
+        self.crossing = self._process_noise(crossing, expected=15, name="Crossing", divisor=15)
+        self.z_check = self._process_noise(z_check, expected=3, name="Z-check", divisor=3)
+        self.x_check = self._process_noise(x_check, expected=3, name="X-check", divisor=3)
 
-        if np.issubdtype(type(data), np.number):
-            self.data = [data / 3 for _ in range(3)]
-        else:
-            assert (
-                    len(data) == 3
-            ), f"Data qubit noise takes 3 parameters, given {len(data)}."
-            self.data = data
+    @staticmethod
+    def _process_noise(param: float | list[float], expected: int, name: str, divisor: float) -> list[float]:
+        """
+        Process a noise parameter by ensuring it is a list of the expected length.
 
-        if np.issubdtype(type(crossing), np.number):
-            self.crossing = [crossing / 15 for _ in range(15)]
-        else:
-            assert (
-                    len(crossing) == 15
-            ), f"Crossing noise takes 15 parameters, given {len(crossing)}."
-            self.crossing = crossing
+        If a single number is provided, it is uniformly divided by the divisor and repeated.
 
-        if np.issubdtype(type(z_check), np.number):
-            self.z_check = [z_check / 3 for _ in range(3)]
-        else:
-            assert (
-                    len(z_check) == 3
-            ), f"Z check qubit noise takes 3 parameters, given {len(z_check)}."
-            self.z_check = z_check
+        Parameters
+        ----------
+        param : float or list of float
+            The noise parameter.
+        expected : int
+            The expected number of elements.
+        name : str
+            The name of the noise parameter (for error messages).
+        divisor : float
+            The divisor used when a single number is provided.
 
-        if np.issubdtype(type(x_check), np.number):
-            self.x_check = [x_check / 3 for _ in range(3)]
+        Returns
+        -------
+        list of float
+            The processed noise parameter.
+        """
+        if np.issubdtype(type(param), np.number):
+            return [param / divisor for _ in range(expected)]
         else:
-            assert (
-                    len(x_check) == 3
-            ), f"Data qubit noise takes 3 parameters, given {len(z_check)}."
-            self.x_check = x_check
+            assert len(param) == expected, f"{name} noise takes {expected} parameters, given {len(param)}."
+            return param
 
-# TODO: Implement a classical code class, and make code classes acquire this instead of clists.
+
 class ClassicalCode:
+    """
+    Placeholder for a classical code representation.
+    """
     def __init__(self):
         pass
