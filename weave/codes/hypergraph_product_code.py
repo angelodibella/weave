@@ -5,8 +5,7 @@ from ldpc import mod2
 from matplotlib import pyplot as plt
 
 from .base import NoiseModel
-from ..util import pcm
-from ..util.graph import compute_layout, find_edge_crossings, draw_graph
+from ..util import pcm, graph
 
 
 class HypergraphProductCode:
@@ -83,11 +82,11 @@ class HypergraphProductCode:
 
         # Compute node positions using the general layout utility.
         if self.pos is None or isinstance(self.pos, str):
-            self.pos = compute_layout(self.graph, self.pos or "random", index_key="index")
+            self.pos = graph.compute_layout(self.graph, self.pos or "random", index_key="index")
 
         # Compute crossings using the utility function.
         edges = [tuple(self.graph.nodes[node]["index"] for node in edge) for edge in self.graph.edges]
-        self.crossings = find_edge_crossings(self.pos, edges)
+        self.crossings = graph.find_edge_crossings(self.pos, edges)
 
         self.construct_code()
 
@@ -279,5 +278,5 @@ class HypergraphProductCode:
         **kwargs
             Additional keyword arguments for drawing.
         """
-        draw_graph(self.graph, self.pos, with_labels=with_labels, crossings=crossings, connection_rad=connection_rad,
+        graph.draw(self.graph, self.pos, with_labels=with_labels, crossings=crossings, connection_rad=connection_rad,
                    **kwargs)

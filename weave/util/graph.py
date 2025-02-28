@@ -94,7 +94,7 @@ def find_edge_crossings(pos: list[tuple[float, float]], edges: list[tuple[int, i
     return crossings
 
 
-def draw_graph(
+def draw(
         graph: nx.Graph,
         pos: list[tuple[float, float]],
         with_labels: bool = False,
