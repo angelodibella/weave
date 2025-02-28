@@ -2,10 +2,12 @@ import pytest
 from weave.codes.base import NoiseModel
 from weave.util import pcm
 
+
 @pytest.fixture
 def zero_noise():
     # A NoiseModel with all noise levels set to zero.
     return NoiseModel(data=0.0, z_check=0.0, x_check=0.0, circuit=0.0, crossing=0.0)
+
 
 @pytest.fixture
 def repetition_clist():
@@ -13,6 +15,7 @@ def repetition_clist():
     H = pcm.repetition(4)  # H is (3,4)
     clist = pcm.to_clist(H)
     return clist
+
 
 @pytest.fixture
 def hamming_clist():

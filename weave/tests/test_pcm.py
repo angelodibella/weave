@@ -2,24 +2,30 @@ import numpy as np
 import pytest
 from weave.util import pcm
 
+
 def test_repetition():
     # For n=4, repetition should return a matrix of shape (3,4).
     H = pcm.repetition(4)
     assert H.shape == (3, 4)
+
     # Check that the last column is all ones.
     np.testing.assert_array_equal(H[:, -1], np.ones(3, dtype=int))
+
 
 def test_hamming_valid():
     # For n=7, Hamming should return a matrix of shape (m,7) where m = ceil(log2(8)) = 3.
     H = pcm.hamming(7)
     assert H.shape == (3, 7)
+
     # Verify that all elements are 0 or 1.
     assert np.all((H == 0) | (H == 1))
+
 
 def test_hamming_invalid():
     # For an invalid n (not equal to 2^m - 1), hamming should raise a ValueError.
     with pytest.raises(ValueError):
         pcm.hamming(6)
+
 
 def test_hypergraph_product_dimensions():
     # Create simple matrices using repetition codes.
@@ -32,17 +38,20 @@ def test_hypergraph_product_dimensions():
     assert HX.shape == (15, 32)
     assert HZ.shape == (16, 32)
 
+
 def test_css_commutation():
     # Test that HX * HZ^T mod 2 equals the zero matrix.
     H1 = pcm.repetition(4)
     H2 = pcm.repetition(5)
     HX, HZ = pcm.hypergraph_product(H1, H2, reordered=False)
+
     product = np.mod(np.dot(HX, HZ.T), 2)
     assert np.all(product == 0)
 
+
 def test_to_matrix_and_to_clist():
-    # Create a repetition code matrix, convert to clist, then back to a matrix,
-    # and ensure the reconstructed matrix matches the original.
+    # Create a repetition code matrix, convert to clist, then back to a matrix, and ensure the reconstructed matrix
+    # matches the original.
     H = pcm.repetition(4)
     clist = pcm.to_clist(H)
     H_reconstructed = pcm.to_matrix(clist)
