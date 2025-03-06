@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-weave-edit = "weave.gui.editor:main"
+wv = "weave.gui.editor:main"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.3.4"
