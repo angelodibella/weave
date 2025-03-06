@@ -115,7 +115,8 @@ class CodeEditorCanvas(QWidget):
                 painter.drawEllipse(QPointF(x, y), r, r)
             else:
                 # Draw square nodes with subpixel precision.
-                rect = QRectF(x - r, y - r, 2 * r, 2 * r)
+                l = 1.86 * r
+                rect = QRectF(x - l / 2, y - l / 2, l, l)
                 painter.drawRect(rect)
         painter.restore()
 
