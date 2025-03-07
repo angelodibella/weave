@@ -87,22 +87,32 @@ class Canvas(QWidget):
         for edge in self.edges:
             pen = QPen(QColor("green") if edge.get('selected', False) else QColor("black"), 0.8)
             painter.setPen(pen)
+
             source = self.get_node_by_id(edge['source'])
             target = self.get_node_by_id(edge['target'])
             if source is None or target is None:
                 continue
+
             src_center = QPointF(source['pos'][0], source['pos'][1])
             tgt_center = QPointF(target['pos'][0], target['pos'][1])
+
+            # Check if the nodes are quantum: no clipping prevention is necessary.
+            if source["type"] not in {"bit", "parity_check"}:
+                painter.drawLine(src_center, tgt_center)
+                continue
+
             dx = tgt_center.x() - src_center.x()
             dy = tgt_center.y() - src_center.y()
             dist = math.hypot(dx, dy)
             if dist == 0:
                 continue
+
             # Compute margins so edges begin at node boundaries.
             margin_source = self._get_margin(source, dx, dy)
             margin_target = self._get_margin(target, -dx, -dy)
             if margin_source + margin_target > dist:
                 continue
+
             new_src = QPointF(src_center.x() + dx / dist * margin_source,
                               src_center.y() + dy / dist * margin_source)
             new_tgt = QPointF(tgt_center.x() - dx / dist * margin_target,
@@ -563,4 +573,3 @@ class Canvas(QWidget):
 
     def _toggle_crossings(self):
         self.show_crossings = not self.show_crossings
-
