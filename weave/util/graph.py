@@ -163,5 +163,8 @@ def draw(
             B2 = line2[0, 0] - line2[1, 0]
             C2 = A2 * line2[0, 0] + B2 * line2[0, 1]
             det = A1 * B2 - A2 * B1
-
+            if det != 0:
+                x = (C1 * B2 - C2 * B1) / det
+                y = (A1 * C2 - A2 * C1) / det
+                plt.scatter(x, y, color="black", s=15, marker="D")
     plt.axis("off")
