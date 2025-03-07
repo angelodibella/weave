@@ -1,10 +1,10 @@
 from PySide6.QtWidgets import QMainWindow
-from .code_editor_canvas import CodeEditorCanvas
+from .canvas import Canvas
 
 
-class MainEditorWindow(QMainWindow):
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Weave QEC Code Editor")
-        self.canvas = CodeEditorCanvas(self)
+        self.canvas = Canvas(self)
         self.setCentralWidget(self.canvas)
