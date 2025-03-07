@@ -119,32 +119,6 @@ class Canvas(QWidget):
                               tgt_center.y() - dy / dist * margin_target)
             painter.drawLine(new_src, new_tgt)
 
-        # Draw nodes.
-        for node in self.nodes:
-            x = node['pos'][0]
-            y = node['pos'][1]
-            r = self.node_radius
-            l = 1.86 * r
-            node_type = node['type']
-            if node_type in {"bit", "parity_check"}:
-                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else QColor("black"))
-                if node_type == "bit":
-                    painter.drawEllipse(QPointF(x, y), r, r)
-                else:
-                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-            else:
-                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else Qt.NoPen)
-                if node_type == "qubit":
-                    painter.setBrush(QColor("#D3D3D3"))
-                    painter.drawEllipse(QPointF(x, y), r, r)
-                elif node_type == "Z_stabilizer":
-                    painter.setBrush(QColor("#ADD8E6"))
-                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-                elif node_type == "X_stabilizer":
-                    painter.setBrush(QColor("#FFC0CB"))
-                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-                painter.setBrush(QColor("transparent"))
-
         # Draw quantum crossings if enabled.
         if self.show_crossings:
             # Filter quantum nodes and edges.
@@ -192,6 +166,33 @@ class Canvas(QWidget):
                         painter.setPen(Qt.NoPen)
                         painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
                         painter.restore()
+
+        # Draw nodes.
+        for node in self.nodes:
+            x = node['pos'][0]
+            y = node['pos'][1]
+            r = self.node_radius
+            l = 1.86 * r
+            node_type = node['type']
+            if node_type in {"bit", "parity_check"}:
+                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else QColor("black"))
+                if node_type == "bit":
+                    painter.drawEllipse(QPointF(x, y), r, r)
+                else:
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+            else:
+                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else Qt.NoPen)
+                if node_type == "qubit":
+                    painter.setBrush(QColor("#D3D3D3"))
+                    painter.drawEllipse(QPointF(x, y), r, r)
+                elif node_type == "Z_stabilizer":
+                    painter.setBrush(QColor("#ADD8E6"))
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+                elif node_type == "X_stabilizer":
+                    painter.setBrush(QColor("#FFC0CB"))
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+                painter.setBrush(QColor("transparent"))
+
         painter.restore()
 
     def wheelEvent(self, event: QWheelEvent):
