@@ -127,24 +127,21 @@ class Canvas(QWidget):
             l = 1.86 * r
             node_type = node['type']
             if node_type in {"bit", "parity_check"}:
-                pen = QPen(QColor("green") if node.get('selected', False) else QColor("black"), 1)
-                painter.setPen(pen)
+                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else QColor("black"))
                 if node_type == "bit":
                     painter.drawEllipse(QPointF(x, y), r, r)
                 else:
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
             else:
+                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else Qt.NoPen)
                 if node_type == "qubit":
                     painter.setBrush(QColor("#D3D3D3"))
-                    painter.setPen(Qt.NoPen)
                     painter.drawEllipse(QPointF(x, y), r, r)
                 elif node_type == "Z_stabilizer":
                     painter.setBrush(QColor("#ADD8E6"))
-                    painter.setPen(Qt.NoPen)
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
                 elif node_type == "X_stabilizer":
                     painter.setBrush(QColor("#FFC0CB"))
-                    painter.setPen(Qt.NoPen)
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
                 painter.setBrush(QColor("transparent"))
 
