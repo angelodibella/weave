@@ -5,7 +5,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheel
 from PySide6.QtCore import Qt, QPointF, QRectF
 
 
-class CodeEditorCanvas(QWidget):
+class Canvas(QWidget):
     """
     An interactive canvas for editing quantum error-correcting codes.
 
@@ -57,6 +57,7 @@ class CodeEditorCanvas(QWidget):
         spacing = 20
         dot_radius = 1
         painter.setPen(QPen(QColor("lightgray")))
+
         # Compute grid indices from view_offset and widget dimensions.
         vox = self.view_offset.x()
         voy = self.view_offset.y()
@@ -120,39 +121,6 @@ class CodeEditorCanvas(QWidget):
                 painter.drawRect(rect)
         painter.restore()
 
-    def _get_margin(self, node, dx, dy):
-        """
-        Compute the margin for edge clipping from a node's center.
-
-        For 'bit' nodes, the margin is simply node_radius. For square nodes ('parity_check'), compute the distance to
-        the square's boundary along the ray (dx, dy) and add an epsilon.
-
-        Parameters
-        ----------
-        node : dict
-            The node dictionary.
-        dx : float
-            Difference in x from source to target.
-        dy : float
-            Difference in y from source to target.
-
-        Returns
-        -------
-        float
-            The margin distance.
-        """
-        r = self.node_radius
-        if node['type'] == "bit":
-            return r
-        else:
-            if dx == 0 and dy == 0:
-                return r
-            dist = math.hypot(dx, dy)
-            cos_theta = abs(dx) / dist
-            sin_theta = abs(dy) / dist
-            epsilon = 0.25
-            return r / max(cos_theta, sin_theta) + epsilon
-
     def wheelEvent(self, event: QWheelEvent):
         """
         Zoom the view relative to the cursor position.
@@ -215,6 +183,110 @@ class CodeEditorCanvas(QWidget):
             print("Save functionality not implemented yet.")
         self.update()
 
+    def mousePressEvent(self, event: QMouseEvent):
+        """
+        Handle mouse press events.
+
+        Left-click selects nodes or edges and begins dragging or panning.
+        Ctrl+left-click creates an edge between nodes.
+        """
+        pos = event.position()  # QPointF
+        if event.button() == Qt.LeftButton:
+            clicked_node = self._get_node_at(pos)
+            if clicked_node:
+                if event.modifiers() & Qt.ControlModifier:
+                    selected = self._get_selected_node()
+                    if selected and clicked_node:
+                        if self._is_valid_connection(selected, clicked_node):
+                            if not self._edge_exists(selected['id'], clicked_node['id']):
+                                self.edges.append({
+                                    'source': selected['id'],
+                                    'target': clicked_node['id'],
+                                    'selected': False
+                                })
+                            self._deselect_all()
+                    else:
+                        self._deselect_all()
+                        clicked_node['selected'] = True
+                    self.update()
+                else:
+                    self._deselect_all()
+                    clicked_node['selected'] = True
+                    self.dragged_node = clicked_node
+                    node_center = QPointF(clicked_node['pos'][0] * self.zoom + self.view_offset.x(),
+                                          clicked_node['pos'][1] * self.zoom + self.view_offset.y())
+                    self.drag_offset = pos - node_center
+            else:
+                clicked_edge = self._get_edge_at(pos)
+                if clicked_edge:
+                    self._deselect_all()
+                    clicked_edge['selected'] = True
+                else:
+                    self._deselect_all()
+                    self.pan_active = True
+                    self.last_pan_point = pos
+            self.update()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """
+        Handle mouse move events.
+
+        Updates node positions when dragging or adjusts view_offset when panning.
+        """
+        pos = event.position()
+        if self.dragged_node is not None:
+            new_center = pos - self.drag_offset
+            world_x = (new_center.x() - self.view_offset.x()) / self.zoom
+            world_y = (new_center.y() - self.view_offset.y()) / self.zoom
+            self.dragged_node['pos'] = (world_x, world_y)
+            self.update()
+        elif self.pan_active and self.last_pan_point is not None:
+            delta = pos - self.last_pan_point
+            self.view_offset += delta
+            self.last_pan_point = pos
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """
+        Handle mouse release events, ending panning or dragging.
+        """
+        if self.pan_active:
+            self.pan_active = False
+            self.last_pan_point = None
+        if self.dragged_node is not None:
+            self.dragged_node = None
+        super().mouseReleaseEvent(event)
+
+    def save_to_file(self, filename):
+        """
+        Save the current nodes and edges to a JSON file.
+
+        Parameters
+        ----------
+        filename : str
+            The path to the file.
+        """
+        data = {'nodes': self.nodes, 'edges': self.edges}
+        with open(filename, 'w') as f:
+            json.dump(data, f)
+
+    def load_from_file(self, filename):
+        """
+        Load nodes and edges from a JSON file.
+
+        Parameters
+        ----------
+        filename : str
+            The path to the file.
+        """
+        with open(filename, 'r') as f:
+            data = json.load(f)
+        self.nodes = data.get('nodes', [])
+        self.edges = data.get('edges', [])
+        self.update()
+
     def add_node_at(self, pos, node_type):
         """
         Add a new node at the given widget position.
@@ -238,6 +310,58 @@ class CodeEditorCanvas(QWidget):
         }
         self.nodes.append(new_node)
         self.update()
+
+    def get_node_by_id(self, node_id):
+        """
+        Return the node with the specified id.
+
+        Parameters
+        ----------
+        node_id : int
+            The node identifier.
+
+        Returns
+        -------
+        dict or None
+            The node dictionary, or None if not found.
+        """
+        for node in self.nodes:
+            if node['id'] == node_id:
+                return node
+        return None
+
+    def _get_margin(self, node, dx, dy):
+        """
+        Compute the margin for edge clipping from a node's center.
+
+        For 'bit' nodes, the margin is simply node_radius. For square nodes ('parity_check'), compute the distance to
+        the square's boundary along the ray (dx, dy) and add an epsilon.
+
+        Parameters
+        ----------
+        node : dict
+            The node dictionary.
+        dx : float
+            Difference in x from source to target.
+        dy : float
+            Difference in y from source to target.
+
+        Returns
+        -------
+        float
+            The margin distance.
+        """
+        r = self.node_radius
+        if node['type'] == "bit":
+            return r
+        else:
+            if dx == 0 and dy == 0:
+                return r
+            dist = math.hypot(dx, dy)
+            cos_theta = abs(dx) / dist
+            sin_theta = abs(dy) / dist
+            epsilon = 0.25
+            return r / max(cos_theta, sin_theta) + epsilon
 
     def _get_node_at(self, pos):
         """
@@ -353,126 +477,3 @@ class CodeEditorCanvas(QWidget):
             if self._distance_point_to_segment(world_pos, a, b) <= threshold:
                 return edge
         return None
-
-    def mousePressEvent(self, event: QMouseEvent):
-        """
-        Handle mouse press events.
-
-        Left-click selects nodes or edges and begins dragging or panning.
-        Ctrl+left-click creates an edge between nodes.
-        """
-        pos = event.position()  # QPointF
-        if event.button() == Qt.LeftButton:
-            clicked_node = self._get_node_at(pos)
-            if clicked_node:
-                if event.modifiers() & Qt.ControlModifier:
-                    selected = self._get_selected_node()
-                    if selected and clicked_node:
-                        if self._is_valid_connection(selected, clicked_node):
-                            if not self._edge_exists(selected['id'], clicked_node['id']):
-                                self.edges.append({
-                                    'source': selected['id'],
-                                    'target': clicked_node['id'],
-                                    'selected': False
-                                })
-                            self._deselect_all()
-                    else:
-                        self._deselect_all()
-                        clicked_node['selected'] = True
-                    self.update()
-                else:
-                    self._deselect_all()
-                    clicked_node['selected'] = True
-                    self.dragged_node = clicked_node
-                    node_center = QPointF(clicked_node['pos'][0] * self.zoom + self.view_offset.x(),
-                                          clicked_node['pos'][1] * self.zoom + self.view_offset.y())
-                    self.drag_offset = pos - node_center
-            else:
-                clicked_edge = self._get_edge_at(pos)
-                if clicked_edge:
-                    self._deselect_all()
-                    clicked_edge['selected'] = True
-                else:
-                    self._deselect_all()
-                    self.pan_active = True
-                    self.last_pan_point = pos
-            self.update()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        """
-        Handle mouse move events.
-
-        Updates node positions when dragging or adjusts view_offset when panning.
-        """
-        pos = event.position()
-        if self.dragged_node is not None:
-            new_center = pos - self.drag_offset
-            world_x = (new_center.x() - self.view_offset.x()) / self.zoom
-            world_y = (new_center.y() - self.view_offset.y()) / self.zoom
-            self.dragged_node['pos'] = (world_x, world_y)
-            self.update()
-        elif self.pan_active and self.last_pan_point is not None:
-            delta = pos - self.last_pan_point
-            self.view_offset += delta
-            self.last_pan_point = pos
-            self.update()
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        """
-        Handle mouse release events, ending panning or dragging.
-        """
-        if self.pan_active:
-            self.pan_active = False
-            self.last_pan_point = None
-        if self.dragged_node is not None:
-            self.dragged_node = None
-        super().mouseReleaseEvent(event)
-
-    def get_node_by_id(self, node_id):
-        """
-        Return the node with the specified id.
-
-        Parameters
-        ----------
-        node_id : int
-            The node identifier.
-
-        Returns
-        -------
-        dict or None
-            The node dictionary, or None if not found.
-        """
-        for node in self.nodes:
-            if node['id'] == node_id:
-                return node
-        return None
-
-    def save_to_file(self, filename):
-        """
-        Save the current nodes and edges to a JSON file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the file.
-        """
-        data = {'nodes': self.nodes, 'edges': self.edges}
-        with open(filename, 'w') as f:
-            json.dump(data, f)
-
-    def load_from_file(self, filename):
-        """
-        Load nodes and edges from a JSON file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the file.
-        """
-        with open(filename, 'r') as f:
-            data = json.load(f)
-        self.nodes = data.get('nodes', [])
-        self.edges = data.get('edges', [])
-        self.update()
