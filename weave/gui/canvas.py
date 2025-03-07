@@ -146,6 +146,7 @@ class Canvas(QWidget):
                     painter.setBrush(QColor("#FFC0CB"))
                     painter.setPen(Qt.NoPen)
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+                painter.setBrush(QColor("transparent"))
 
         # Draw quantum crossings if enabled.
         if self.show_crossings:
