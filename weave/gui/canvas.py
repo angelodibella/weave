@@ -4,6 +4,8 @@ from PySide6.QtWidgets import QWidget, QMenu
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
+from ..util.graph import find_edge_crossings, line_intersection
+
 
 class Canvas(QWidget):
     """
@@ -157,14 +159,8 @@ class Canvas(QWidget):
                     j = id_to_index[edge['target']]
                     edge_list.append((i, j))
 
-                # Use the function from graph.py to find crossings.
-                try:
-                    from ..util import graph  # Adjust relative import as needed.
-                    crossings = graph.find_edge_crossings(pos_list, edge_list)
-                except Exception:
-                    crossings = set()
-
                 # For each crossing, compute approximate intersection and draw a diamond.
+                crossings = find_edge_crossings(pos_list, edge_list)
                 for crossing in crossings:
                     # Each crossing is a frozenset of two edges, extract them.
                     edge_pair = list(crossing)
@@ -178,7 +174,7 @@ class Canvas(QWidget):
 
                     a, b = get_endpoints(e1)
                     c, d = get_endpoints(e2)
-                    ip = self._line_intersection(a, b, c, d)
+                    ip = line_intersection(a, b, c, d)
                     if ip is not None:
                         size = 4  # size of the square in world units
                         painter.save()
@@ -568,19 +564,3 @@ class Canvas(QWidget):
     def _toggle_crossings(self):
         self.show_crossings = not self.show_crossings
 
-    def _line_intersection(self, a, b, c, d):
-        """
-        Compute the intersection point of lines ab and cd.
-        Each parameter is a tuple (x, y) in world coordinates.
-        Returns (x, y) if lines intersect, else None.
-        """
-        x1, y1 = a
-        x2, y2 = b
-        x3, y3 = c
-        x4, y4 = d
-        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if denom == 0:
-            return None
-        x = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom
-        y = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom
-        return (x, y)
