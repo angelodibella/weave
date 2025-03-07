@@ -43,6 +43,8 @@ class Canvas(QWidget):
         self.dragged_node = None
         self.drag_offset = QPointF(0, 0)
 
+        self.show_crossings = True
+
     def paintEvent(self, event):
         """
         Draw the grid, nodes, and edges.
@@ -107,18 +109,85 @@ class Canvas(QWidget):
 
         # Draw nodes.
         for node in self.nodes:
-            pen = QPen(QColor("green") if node.get('selected', False) else QColor("black"), 1)
-            painter.setPen(pen)
             x = node['pos'][0]
             y = node['pos'][1]
             r = self.node_radius
-            if node['type'] == "bit":
-                painter.drawEllipse(QPointF(x, y), r, r)
+            l = 1.86 * r
+            node_type = node['type']
+            if node_type in {"bit", "parity_check"}:
+                pen = QPen(QColor("green") if node.get('selected', False) else QColor("black"), 1)
+                painter.setPen(pen)
+                if node_type == "bit":
+                    painter.drawEllipse(QPointF(x, y), r, r)
+                else:
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
             else:
-                # Draw square nodes with subpixel precision.
-                l = 1.86 * r
-                rect = QRectF(x - l / 2, y - l / 2, l, l)
-                painter.drawRect(rect)
+                if node_type == "qubit":
+                    painter.setBrush(QColor("#D3D3D3"))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawEllipse(QPointF(x, y), r, r)
+                elif node_type == "Z_stabilizer":
+                    painter.setBrush(QColor("#ADD8E6"))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+                elif node_type == "X_stabilizer":
+                    painter.setBrush(QColor("#FFC0CB"))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+
+        # Draw quantum crossings if enabled.
+        if self.show_crossings:
+            # Filter quantum nodes and edges.
+            quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+            qnodes = {node['id']: node for node in self.nodes if node['type'] in quantum_types}
+            qedges = [edge for edge in self.edges
+                      if self.get_node_by_id(edge['source']) and self.get_node_by_id(edge['target'])
+                      and self.get_node_by_id(edge['source'])['type'] in quantum_types
+                      and self.get_node_by_id(edge['target'])['type'] in quantum_types]
+            if qnodes and qedges:
+                # Build a mapping from quantum node id to a continuous index and a list of positions.
+                qnode_ids = list(qnodes.keys())
+                id_to_index = {node_id: i for i, node_id in enumerate(qnode_ids)}
+                pos_list = [qnodes[node_id]['pos'] for node_id in qnode_ids]
+
+                # Build edge list as tuples of indices.
+                edge_list = []
+                for edge in qedges:
+                    i = id_to_index[edge['source']]
+                    j = id_to_index[edge['target']]
+                    edge_list.append((i, j))
+
+                # Use the function from graph.py to find crossings.
+                try:
+                    from ..util import graph  # Adjust relative import as needed.
+                    crossings = graph.find_edge_crossings(pos_list, edge_list)
+                except Exception:
+                    crossings = set()
+
+                # For each crossing, compute approximate intersection and draw a diamond.
+                for crossing in crossings:
+                    # Each crossing is a frozenset of two edges, extract them.
+                    edge_pair = list(crossing)
+                    e1, e2 = edge_pair[0], edge_pair[1]
+
+                    # Get the endpoints (in world coordinates) for each edge.
+                    def get_endpoints(e):
+                        n1 = qnodes[qnode_ids[e[0]]]['pos']
+                        n2 = qnodes[qnode_ids[e[1]]]['pos']
+                        return n1, n2
+
+                    a, b = get_endpoints(e1)
+                    c, d = get_endpoints(e2)
+                    ip = self._line_intersection(a, b, c, d)
+                    if ip is not None:
+                        size = 4  # size of the square in world units
+                        painter.save()
+                        painter.translate(ip[0], ip[1])
+                        painter.rotate(45)
+                        painter.setBrush(QColor("black"))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
+                        painter.restore()
         painter.restore()
 
     def wheelEvent(self, event: QWheelEvent):
@@ -171,16 +240,23 @@ class Canvas(QWidget):
         Display a context menu for creating nodes or saving the code.
         """
         menu = QMenu(self)
-        new_bit_action = menu.addAction("New Bit")
-        new_check_action = menu.addAction("New Parity Check")
-        save_action = menu.addAction("Save Code as CSV")
-        action = menu.exec(event.globalPos())
-        if action == new_bit_action:
-            self.add_node_at(event.pos(), "bit")
-        elif action == new_check_action:
-            self.add_node_at(event.pos(), "parity_check")
-        elif action == save_action:
-            print("Save functionality not implemented yet.")
+
+        # Classical node options.
+        menu.addAction("New Bit", lambda: self.add_node_at(event.pos(), "bit"))
+        menu.addAction("New Parity Check", lambda: self.add_node_at(event.pos(), "parity_check"))
+
+        # Quantum node options.
+        quantum_menu = menu.addMenu("New Quantum Node")
+        quantum_menu.addAction("New Qubit", lambda: self.add_node_at(event.pos(), "qubit"))
+        quantum_menu.addAction("New Z-Stabilizer", lambda: self.add_node_at(event.pos(), "Z_stabilizer"))
+        quantum_menu.addAction("New X-Stabilizer", lambda: self.add_node_at(event.pos(), "X_stabilizer"))
+
+        # Toggle crossings.
+        menu.addAction("Toggle Crossings", lambda: self._toggle_crossings())
+
+        # Save option.
+        menu.addAction("Save Code as CSV", lambda: print("Save functionality not implemented yet."))
+        menu.exec(event.globalPos())
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -412,11 +488,22 @@ class Canvas(QWidget):
                 return edge
         return None
 
-    def _is_valid_connection(self, source, target):
+    def _is_valid_connection(self, source, target) -> bool:
         """
-        Check if a connection between two nodes is valid (nodes must be of different types).
+        Check if a connection between two nodes is valid.
         """
-        return source['type'] != target['type']
+        quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+        classical_types = {"bit", "parity_check"}
+
+        # If both nodes are quantum, allow only qubit–stabilizer connections. If both are classical, allow only
+        # different types.
+        if source["type"] in quantum_types and target["type"] in quantum_types:
+            return ((source["type"] == "qubit" and target["type"] in {"Z_stabilizer", "X_stabilizer"}) or
+                    (target["type"] == "qubit" and source["type"] in {"Z_stabilizer", "X_stabilizer"}))
+        elif source["type"] in classical_types and target["type"] in classical_types:
+            return source["type"] != target["type"]
+        else:
+            return False
 
     def _edge_exists(self, source_id, target_id):
         """
@@ -477,3 +564,23 @@ class Canvas(QWidget):
             if self._distance_point_to_segment(world_pos, a, b) <= threshold:
                 return edge
         return None
+
+    def _toggle_crossings(self):
+        self.show_crossings = not self.show_crossings
+
+    def _line_intersection(self, a, b, c, d):
+        """
+        Compute the intersection point of lines ab and cd.
+        Each parameter is a tuple (x, y) in world coordinates.
+        Returns (x, y) if lines intersect, else None.
+        """
+        x1, y1 = a
+        x2, y2 = b
+        x3, y3 = c
+        x4, y4 = d
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if denom == 0:
+            return None
+        x = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom
+        y = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom
+        return (x, y)
