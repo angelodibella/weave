@@ -94,6 +94,24 @@ def find_edge_crossings(pos: list[tuple[float, float]], edges: list[tuple[int, i
     return crossings
 
 
+def line_intersection(a: float, b: float, c: float, d: float) -> None | tuple[float]:
+    """
+    Compute the intersection point of lines ab and cd.
+    Each parameter is a tuple (x, y) in world coordinates.
+    Returns (x, y) if lines intersect, else None.
+    """
+    x1, y1 = a
+    x2, y2 = b
+    x3, y3 = c
+    x4, y4 = d
+    denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if denom == 0:
+        return None
+    x = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom
+    y = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom
+    return (x, y)
+
+
 def draw(
         graph: nx.Graph,
         pos: list[tuple[float, float]],
@@ -154,17 +172,8 @@ def draw(
         cross_set = find_edge_crossings(pos, edges)
         for crossing in cross_set:
             e1, e2 = list(crossing)
-            line1 = np.array([pos[e1[0]], pos[e1[1]]])
-            line2 = np.array([pos[e2[0]], pos[e2[1]]])
-            A1 = line1[1, 1] - line1[0, 1]
-            B1 = line1[0, 0] - line1[1, 0]
-            C1 = A1 * line1[0, 0] + B1 * line1[0, 1]
-            A2 = line2[1, 1] - line2[0, 1]
-            B2 = line2[0, 0] - line2[1, 0]
-            C2 = A2 * line2[0, 0] + B2 * line2[0, 1]
-            det = A1 * B2 - A2 * B1
-            if det != 0:
-                x = (C1 * B2 - C2 * B1) / det
-                y = (A1 * C2 - A2 * C1) / det
-                plt.scatter(x, y, color="black", s=15, marker="D")
+            pt = line_intersection(pos[e1[0]], pos[e1[1]], pos[e2[0]], pos[e2[1]])
+            if pt is not None:
+                plt.scatter(pt[0], pt[1], color="black", s=15, marker="D")
+
     plt.axis("off")
