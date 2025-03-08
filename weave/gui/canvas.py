@@ -134,8 +134,10 @@ class Canvas(QWidget):
 
         # Draw selection area.
         if self.selecting and self.selection_rect is not None:
-            painter.setPen(QPen(QColor("blue"), 1, Qt.DashLine))
-
+            painter.setPen(Qt.NoPen)
+            # Create a light gray color with 50% transparency.
+            selection_color = QColor(211, 211, 211, 128)
+            painter.setBrush(selection_color)
             # Convert world coordinates back to widget coordinates.
             rect = QRectF(
                 self.selection_rect[0] * self.zoom + self.view_offset.x(),
@@ -143,7 +145,9 @@ class Canvas(QWidget):
                 (self.selection_rect[2] - self.selection_rect[0]) * self.zoom,
                 (self.selection_rect[3] - self.selection_rect[1]) * self.zoom
             )
-            painter.drawRect(rect)
+            painter.drawRoundedRect(rect, 5, 5)
+            # Reset the brush to avoid affecting other drawing.
+            painter.setBrush(Qt.NoBrush)
 
         # ----- Draw world objects (nodes and edges) -----
         painter.save()
