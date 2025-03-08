@@ -1,5 +1,7 @@
 import json
 import math
+from typing import Any
+
 from PySide6.QtWidgets import QWidget, QMenu
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
@@ -7,18 +9,63 @@ from PySide6.QtCore import Qt, QPointF, QRectF
 from ..util.graph import find_edge_crossings, line_intersection
 
 
+def _is_valid_connection(source: dict[str, Any], target: dict[str, Any]) -> bool:
+    """
+    Check if a connection between two nodes is valid.
+    """
+    quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+    classical_types = {"bit", "parity_check"}
+
+    # If both nodes are quantum, allow only qubit–stabilizer connections. If both are classical, allow only
+    # different types.
+    if source["type"] in quantum_types and target["type"] in quantum_types:
+        return ((source["type"] == "qubit" and target["type"] in {"Z_stabilizer", "X_stabilizer"}) or
+                (target["type"] == "qubit" and source["type"] in {"Z_stabilizer", "X_stabilizer"}))
+    elif source["type"] in classical_types and target["type"] in classical_types:
+        return source["type"] != target["type"]
+    else:
+        return False
+
+
+def _distance_point_to_segment(p: QPointF, a: QPointF, b: QPointF) -> float:
+    """
+    Compute the distance from point p to the line segment ab.
+
+    Parameters
+    ----------
+    p : QPointF
+        The point.
+    a : QPointF
+        Start point of the segment.
+    b : QPointF
+        End point of the segment.
+
+    Returns
+    -------
+    float
+        The distance from p to the segment.
+    """
+    ax, ay = a.x(), a.y()
+    bx, by = b.x(), b.y()
+    px, py = p.x(), p.y()
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+    t = max(0, min(1, t))
+    proj_x = ax + t * dx
+    proj_y = ay + t * dy
+    return math.hypot(px - proj_x, py - proj_y)
+
+
 class Canvas(QWidget):
     """
     An interactive canvas for editing quantum error-correcting codes.
-
-    The canvas displays a continuous triangular lattice grid (in widget coordinates) and renders world objects (nodes
-    and edges) with a translation and zoom transformation. It supports node/edge creation, dragging, panning, and
-    cursor-relative zooming.
     """
 
     def __init__(self, parent=None):
         """
-        Initialize the CodeEditorCanvas.
+        Initialize the canvas.
 
         Parameters
         ----------
@@ -44,6 +91,13 @@ class Canvas(QWidget):
         self.last_pan_point = None  # QPointF
         self.dragged_node = None
         self.drag_offset = QPointF(0, 0)
+
+        self.selecting = False  # Whether a rectangular selection is active.
+        self.selection_rect_start = None  # The starting world coordinate of the selection.
+        self.selection_rect = None  # Current selection rectangle (x_min, y_min, x_max, y_max).
+        self.selection_mode = None  # "node" or "edge" selection mode.
+        self._drag_start_positions = {}  # Dictionary to store initial positions of selected nodes when starting a drag.
+        self.drag_start = None  # World coordinate of the start of a drag.
 
         self.show_crossings = True
 
@@ -77,6 +131,19 @@ class Canvas(QWidget):
             for n in range(min_n, max_n + 1):
                 x = n * spacing + vox + row_offset
                 painter.drawEllipse(QPointF(x, y), dot_radius, dot_radius)
+
+        # Draw selection area.
+        if self.selecting and self.selection_rect is not None:
+            painter.setPen(QPen(QColor("blue"), 1, Qt.DashLine))
+
+            # Convert world coordinates back to widget coordinates.
+            rect = QRectF(
+                self.selection_rect[0] * self.zoom + self.view_offset.x(),
+                self.selection_rect[1] * self.zoom + self.view_offset.y(),
+                (self.selection_rect[2] - self.selection_rect[0]) * self.zoom,
+                (self.selection_rect[3] - self.selection_rect[1]) * self.zoom
+            )
+            painter.drawRect(rect)
 
         # ----- Draw world objects (nodes and edges) -----
         painter.save()
@@ -226,17 +293,20 @@ class Canvas(QWidget):
         if event.key() == Qt.Key_Escape:
             self._deselect_all()
         elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
-            selected_node = self._get_selected_node()
-            if selected_node:
-                node_id = selected_node['id']
-                self.nodes = [n for n in self.nodes if n['id'] != node_id]
-                self.edges = [e for e in self.edges if node_id not in (e['source'], e['target'])]
+            selected_nodes = self._get_selected_nodes()
+            if selected_nodes:
+                ids_to_remove = {node['id'] for node in selected_nodes}
+                self.nodes = [n for n in self.nodes if n['id'] not in ids_to_remove]
+                self.edges = [e for e in self.edges if
+                              e['source'] not in ids_to_remove and e['target'] not in ids_to_remove]
                 self._deselect_all()
             else:
-                selected_edge = self._get_selected_edge()
-                if selected_edge:
-                    self.edges = [e for e in self.edges if e != selected_edge]
+                selected_edges = self._get_selected_edges()
+                if selected_edges:
+                    for edge in selected_edges:
+                        self.edges.remove(edge)
                     self._deselect_all()
+            self.update()
         self.update()
         super().keyPressEvent(event)
 
@@ -276,37 +346,59 @@ class Canvas(QWidget):
             clicked_node = self._get_node_at(pos)
             if clicked_node:
                 if event.modifiers() & Qt.ControlModifier:
-                    selected = self._get_selected_node()
-                    if selected and clicked_node:
-                        if self._is_valid_connection(selected, clicked_node):
-                            if not self._edge_exists(selected['id'], clicked_node['id']):
-                                self.edges.append({
-                                    'source': selected['id'],
-                                    'target': clicked_node['id'],
-                                    'selected': False
-                                })
-                            self._deselect_all()
+                    selected_nodes = self._get_selected_nodes()
+                    if selected_nodes:
+                        for sn in selected_nodes:
+                            if sn != clicked_node and _is_valid_connection(sn, clicked_node):
+                                if not self._edge_exists(sn['id'], clicked_node['id']):
+                                    self.edges.append({
+                                        'source': sn['id'],
+                                        'target': clicked_node['id'],
+                                        'selected': False
+                                    })
+                        self._deselect_all()  # Optionally, clear selection after edge creation.
                     else:
-                        self._deselect_all()
                         clicked_node['selected'] = True
                     self.update()
+                elif event.modifiers() & Qt.ShiftModifier:
+                    # If the node is not already selected, add it to the selection.
+                    if not clicked_node.get('selected', False):
+                        clicked_node['selected'] = True
+                    # Otherwise, leave it selected so that dragging moves all selected nodes.
+                    # Record starting positions for all selected nodes.
+                    self._drag_start_positions = {n['id']: n['pos'] for n in self._get_selected_nodes()}
+                    self.drag_start = event.position()
                 else:
                     self._deselect_all()
                     clicked_node['selected'] = True
-                    self.dragged_node = clicked_node
-                    node_center = QPointF(clicked_node['pos'][0] * self.zoom + self.view_offset.x(),
-                                          clicked_node['pos'][1] * self.zoom + self.view_offset.y())
-                    self.drag_offset = pos - node_center
+                    self._drag_start_positions = {clicked_node['id']: clicked_node['pos']}
+                    self.drag_start = event.position()
             else:
                 clicked_edge = self._get_edge_at(pos)
                 if clicked_edge:
-                    self._deselect_all()
-                    clicked_edge['selected'] = True
+                    if event.modifiers() & Qt.ShiftModifier:
+                        clicked_edge['selected'] = True
+                    else:
+                        self._deselect_all()
+                        clicked_edge['selected'] = True
+                    self.update()
                 else:
-                    self._deselect_all()
-                    self.pan_active = True
-                    self.last_pan_point = pos
-            self.update()
+                    # If shift (or ctrl+shift) is held, start a rectangular selection.
+                    if event.modifiers() & Qt.ShiftModifier:
+                        self.selecting = True
+                        # Clear any previous drag state to prevent nodes from moving.
+                        self.drag_start = None
+                        self._drag_start_positions = {}
+                        world_pos = ((pos.x() - self.view_offset.x()) / self.zoom,
+                                     (pos.y() - self.view_offset.y()) / self.zoom)
+                        self.selection_rect_start = world_pos
+                        self.selection_mode = "edge" if event.modifiers() & Qt.ControlModifier else "node"
+                    else:
+                        self._deselect_all()
+                        self.pan_active = True
+                        self.last_pan_point = pos
+                    self.update()
+        self.update()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -315,7 +407,23 @@ class Canvas(QWidget):
 
         Updates node positions when dragging or adjusts view_offset when panning.
         """
+        if self.drag_start is not None:
+            delta = event.position() - self.drag_start
+            delta_world = (delta.x() / self.zoom, delta.y() / self.zoom)
+            for node in self._get_selected_nodes():
+                init_pos = self._drag_start_positions[node['id']]
+                node['pos'] = (init_pos[0] + delta_world[0], init_pos[1] + delta_world[1])
+            self.update()
+
         pos = event.position()
+        if self.selecting:
+            current = ((pos.x() - self.view_offset.x()) / self.zoom,
+                       (pos.y() - self.view_offset.y()) / self.zoom)
+            x1, y1 = self.selection_rect_start
+            x2, y2 = current
+            self.selection_rect = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+            self.update()
+
         if self.dragged_node is not None:
             new_center = pos - self.drag_offset
             world_x = (new_center.x() - self.view_offset.x()) / self.zoom
@@ -336,8 +444,37 @@ class Canvas(QWidget):
         if self.pan_active:
             self.pan_active = False
             self.last_pan_point = None
+
         if self.dragged_node is not None:
             self.dragged_node = None
+
+        if self.selecting and self.selection_rect is not None:
+            x_min, y_min, x_max, y_max = self.selection_rect
+            if self.selection_mode == "node":
+                for node in self.nodes:
+                    x, y = node['pos']
+                    if x_min <= x <= x_max and y_min <= y <= y_max:
+                        node['selected'] = True
+            elif self.selection_mode == "edge":
+                for edge in self.edges:
+                    source = self.get_node_by_id(edge['source'])
+                    target = self.get_node_by_id(edge['target'])
+                    if source and target:
+                        x1, y1 = source['pos']
+                        x2, y2 = target['pos']
+
+                        # Select edge if both endpoints are inside the rectangle.
+                        if (x_min <= x1 <= x_max and y_min <= y1 <= y_max and
+                                x_min <= x2 <= x_max and y_min <= y2 <= y_max):
+                            edge['selected'] = True
+            self.selecting = False
+            self.selection_rect_start = None
+            self.selection_rect = None
+            self.selection_mode = None
+            self.drag_start = None
+            self._drag_start_positions = {}
+            self.update()
+
         super().mouseReleaseEvent(event)
 
     def save_to_file(self, filename):
@@ -475,6 +612,14 @@ class Canvas(QWidget):
         self._deselect_all_nodes()
         self._deselect_all_edges()
 
+    def _get_selected_nodes(self):
+        """Return a list of all currently selected nodes."""
+        return [node for node in self.nodes if node.get('selected', False)]
+
+    def _get_selected_edges(self):
+        """Return a list of all currently selected edges."""
+        return [edge for edge in self.edges if edge.get('selected', False)]
+
     def _get_selected_node(self):
         """
         Return the selected node, if any.
@@ -493,23 +638,6 @@ class Canvas(QWidget):
                 return edge
         return None
 
-    def _is_valid_connection(self, source, target) -> bool:
-        """
-        Check if a connection between two nodes is valid.
-        """
-        quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
-        classical_types = {"bit", "parity_check"}
-
-        # If both nodes are quantum, allow only qubit–stabilizer connections. If both are classical, allow only
-        # different types.
-        if source["type"] in quantum_types and target["type"] in quantum_types:
-            return ((source["type"] == "qubit" and target["type"] in {"Z_stabilizer", "X_stabilizer"}) or
-                    (target["type"] == "qubit" and source["type"] in {"Z_stabilizer", "X_stabilizer"}))
-        elif source["type"] in classical_types and target["type"] in classical_types:
-            return source["type"] != target["type"]
-        else:
-            return False
-
     def _edge_exists(self, source_id, target_id):
         """
         Check if an edge already exists between two nodes (undirected).
@@ -519,36 +647,6 @@ class Canvas(QWidget):
                     (edge['source'] == target_id and edge['target'] == source_id)):
                 return True
         return False
-
-    def _distance_point_to_segment(self, p, a, b):
-        """
-        Compute the distance from point p to the line segment ab.
-
-        Parameters
-        ----------
-        p : QPointF
-            The point.
-        a : QPointF
-            Start point of the segment.
-        b : QPointF
-            End point of the segment.
-
-        Returns
-        -------
-        float
-            The distance from p to the segment.
-        """
-        ax, ay = a.x(), a.y()
-        bx, by = b.x(), b.y()
-        px, py = p.x(), p.y()
-        dx, dy = bx - ax, by - ay
-        if dx == 0 and dy == 0:
-            return math.hypot(px - ax, py - ay)
-        t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
-        t = max(0, min(1, t))
-        proj_x = ax + t * dx
-        proj_y = ay + t * dy
-        return math.hypot(px - proj_x, py - proj_y)
 
     def _get_edge_at(self, pos):
         """
@@ -566,7 +664,7 @@ class Canvas(QWidget):
                 continue
             a = QPointF(source['pos'][0], source['pos'][1])
             b = QPointF(target['pos'][0], target['pos'][1])
-            if self._distance_point_to_segment(world_pos, a, b) <= threshold:
+            if _distance_point_to_segment(world_pos, a, b) <= threshold:
                 return edge
         return None
 
