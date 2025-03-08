@@ -2,7 +2,7 @@ import json
 import math
 from typing import Any
 
-from PySide6.QtWidgets import QWidget, QMenu
+from PySide6.QtWidgets import QWidget, QMenu, QToolButton, QGraphicsDropShadowEffect
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
@@ -96,10 +96,16 @@ class Canvas(QWidget):
         self.selection_rect_start = None  # The starting world coordinate of the selection.
         self.selection_rect = None  # Current selection rectangle (x_min, y_min, x_max, y_max).
         self.selection_mode = None  # "node" or "edge" selection mode.
-        self._drag_start_positions = {}  # Dictionary to store initial positions of selected nodes when starting a drag.
+
         self.drag_start = None  # World coordinate of the start of a drag.
+        self._drag_start_positions = {}  # Dictionary to store initial positions of selected nodes when starting a drag.
+
+        self.shift_pending_toggle = None  # Will hold a reference to the node pending deselection.
 
         self.show_crossings = True
+
+        self.invert_colors = False
+        self._create_hamburger()
 
     def paintEvent(self, event):
         """
@@ -110,11 +116,12 @@ class Canvas(QWidget):
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(self.rect(), self._get_color("white"))
 
         # ----- Draw grid (triangular lattice) in widget coordinates -----
         spacing = 20
         dot_radius = 1
-        painter.setPen(QPen(QColor("lightgray")))
+        painter.setPen(QPen(self._get_color("lightgray")))
 
         # Compute grid indices from view_offset and widget dimensions.
         vox = self.view_offset.x()
@@ -136,7 +143,8 @@ class Canvas(QWidget):
         if self.selecting and self.selection_rect is not None:
             painter.setPen(Qt.NoPen)
             # Create a light gray color with 50% transparency.
-            selection_color = QColor(211, 211, 211, 128)
+            selection_color = self._get_color(QColor(211, 211, 211).name())
+            selection_color.setAlpha(128)
             painter.setBrush(selection_color)
             # Convert world coordinates back to widget coordinates.
             rect = QRectF(
@@ -156,7 +164,7 @@ class Canvas(QWidget):
 
         # Draw edges with thin pen and clipped to node perimeters.
         for edge in self.edges:
-            pen = QPen(QColor("green") if edge.get('selected', False) else QColor("black"), 0.8)
+            pen = QPen(self._get_color("green") if edge.get('selected', False) else self._get_color("black"), 0.8)
             painter.setPen(pen)
 
             source = self.get_node_by_id(edge['source'])
@@ -233,7 +241,7 @@ class Canvas(QWidget):
                         painter.save()
                         painter.translate(ip[0], ip[1])
                         painter.rotate(45)
-                        painter.setBrush(QColor("black"))
+                        painter.setBrush(self._get_color("black"))
                         painter.setPen(Qt.NoPen)
                         painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
                         painter.restore()
@@ -246,23 +254,25 @@ class Canvas(QWidget):
             l = 1.86 * r
             node_type = node['type']
             if node_type in {"bit", "parity_check"}:
-                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else QColor("black"))
+                pen = QPen(self._get_color("green"), 1) if node.get('selected', False) else self._get_color("black")
+                painter.setPen(pen)
                 if node_type == "bit":
                     painter.drawEllipse(QPointF(x, y), r, r)
                 else:
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
             else:
-                painter.setPen(QPen(QColor("green"), 1) if node.get('selected', False) else Qt.NoPen)
+                pen = QPen(self._get_color("green"), 1) if node.get('selected', False) else Qt.NoPen
+                painter.setPen(pen)
                 if node_type == "qubit":
-                    painter.setBrush(QColor("#D3D3D3"))
+                    painter.setBrush(self._get_color("#D3D3D3"))
                     painter.drawEllipse(QPointF(x, y), r, r)
                 elif node_type == "Z_stabilizer":
-                    painter.setBrush(QColor("#ADD8E6"))
+                    painter.setBrush(self._get_color("#ADD8E6"))
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
                 elif node_type == "X_stabilizer":
-                    painter.setBrush(QColor("#FFC0CB"))
+                    painter.setBrush(self._get_color("#FFC0CB"))
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-                painter.setBrush(QColor("transparent"))
+                painter.setBrush(Qt.NoBrush)
 
         painter.restore()
 
@@ -319,6 +329,11 @@ class Canvas(QWidget):
         Display a context menu for creating nodes or saving the code.
         """
         menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint)
+        menu.setAttribute(Qt.WA_TranslucentBackground)
+
+        style = self._get_menu_style_sheet()
+        menu.setStyleSheet(style)
 
         # Classical node options.
         menu.addAction("New Bit", lambda: self.add_node_at(event.pos(), "bit"))
@@ -326,6 +341,11 @@ class Canvas(QWidget):
 
         # Quantum node options.
         quantum_menu = menu.addMenu("New Quantum Node")
+        quantum_menu.setWindowFlags(quantum_menu.windowFlags() | Qt.FramelessWindowHint)
+        quantum_menu.setAttribute(Qt.WA_TranslucentBackground)
+
+        quantum_menu.setStyleSheet(style)
+
         quantum_menu.addAction("New Qubit", lambda: self.add_node_at(event.pos(), "qubit"))
         quantum_menu.addAction("New Z-Stabilizer", lambda: self.add_node_at(event.pos(), "Z_stabilizer"))
         quantum_menu.addAction("New X-Stabilizer", lambda: self.add_node_at(event.pos(), "X_stabilizer"))
@@ -360,23 +380,25 @@ class Canvas(QWidget):
                                         'target': clicked_node['id'],
                                         'selected': False
                                     })
-                        self._deselect_all()  # Optionally, clear selection after edge creation.
+                        self._deselect_all()  # optionally, clear selection after edge creation
                     else:
                         clicked_node['selected'] = True
                     self.update()
                 elif event.modifiers() & Qt.ShiftModifier:
-                    # If the node is not already selected, add it to the selection.
-                    if not clicked_node.get('selected', False):
-                        clicked_node['selected'] = True
-                    # Otherwise, leave it selected so that dragging moves all selected nodes.
-                    # Record starting positions for all selected nodes.
+                    # Record the node, its press position, and its initial selection state.
+                    self._shift_press_node = clicked_node
+                    self._shift_press_pos = event.position()
+                    self._shift_press_was_selected = clicked_node.get('selected', False)
+                    # Record drag-start positions for all selected nodes.
                     self._drag_start_positions = {n['id']: n['pos'] for n in self._get_selected_nodes()}
                     self.drag_start = event.position()
                 else:
+                    # Normal click: clear all selections and select only the clicked node.
                     self._deselect_all()
                     clicked_node['selected'] = True
                     self._drag_start_positions = {clicked_node['id']: clicked_node['pos']}
                     self.drag_start = event.position()
+                self.update()
             else:
                 clicked_edge = self._get_edge_at(pos)
                 if clicked_edge:
@@ -385,12 +407,9 @@ class Canvas(QWidget):
                     else:
                         self._deselect_all()
                         clicked_edge['selected'] = True
-                    self.update()
                 else:
-                    # If shift (or ctrl+shift) is held, start a rectangular selection.
                     if event.modifiers() & Qt.ShiftModifier:
                         self.selecting = True
-                        # Clear any previous drag state to prevent nodes from moving.
                         self.drag_start = None
                         self._drag_start_positions = {}
                         world_pos = ((pos.x() - self.view_offset.x()) / self.zoom,
@@ -401,7 +420,7 @@ class Canvas(QWidget):
                         self._deselect_all()
                         self.pan_active = True
                         self.last_pan_point = pos
-                    self.update()
+                self.update()
         self.update()
         super().mousePressEvent(event)
 
@@ -439,6 +458,13 @@ class Canvas(QWidget):
             self.view_offset += delta
             self.last_pan_point = pos
             self.update()
+
+        if self.drag_start is not None:
+            delta = event.position() - self.drag_start
+            # If the movement is greater than a small threshold, cancel the pending toggle.
+            if delta.manhattanLength() > 10:
+                self.shift_pending_toggle = None
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -482,7 +508,82 @@ class Canvas(QWidget):
         self.drag_start = None
         self._drag_start_positions = {}
 
+        if hasattr(self, '_shift_press_node') and self._shift_press_node is not None:
+            # If there was minimal movement (i.e. no drag occurred), toggle the node's selection.
+            if (event.position() - self._shift_press_pos).manhattanLength() < 10:
+                # Toggle the selection: if it was selected, deselect it; if it was not, select it.
+                self._shift_press_node['selected'] = not self._shift_press_was_selected
+            self._shift_press_node = None
+            self.update()
+
         super().mouseReleaseEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_hamburger()
+
+    def open_hamburger_menu(self):
+        menu = QMenu(self)
+        # Make the menu frameless and translucent for rounded corners.
+        menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint)
+        menu.setAttribute(Qt.WA_TranslucentBackground)
+
+        # Choose style based on invert_colors.
+        if self.invert_colors:
+            bg_color = "rgba(0, 0, 0, 230)"  # dark background
+            text_color = "#ffffff"
+            selected_color = "rgba(50, 50, 50, 230)"
+        else:
+            bg_color = "rgba(255, 255, 255, 230)"  # light background
+            text_color = "#333333"
+            selected_color = "rgba(230, 230, 230, 230)"
+
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {bg_color};
+                border: none;
+                border-radius: 8px;
+                padding: 5px;
+                margin: 0;
+                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                font-size: 12px;
+                color: {text_color};
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                background-color: transparent;
+                color: {text_color};
+            }}
+            QMenu::item:selected {{
+                background-color: {selected_color};
+                color: {text_color};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: #dcdcdc;
+                margin: 5px 0;
+            }}
+        """)
+
+        action_crossings = menu.addAction("Toggle Crossings")
+        action_invert = menu.addAction("Invert Colors")
+
+        action = menu.exec(self.hamburger.mapToGlobal(self.hamburger.rect().bottomRight()))
+        if action == action_crossings:
+            self._toggle_crossings()
+        elif action == action_invert:
+            self.invert_colors = not self.invert_colors
+            self.update()  # Redraw canvas using new colors.
+            # Update hamburger button style.
+            self.hamburger.setStyleSheet("""
+                QToolButton {
+                    background: none;
+                    border: none;
+                    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                    font-size: 18px;
+                    color: %s;
+                }
+            """ % ("black" if not self.invert_colors else "white"))
 
     def save_to_file(self, filename):
         """
@@ -675,5 +776,83 @@ class Canvas(QWidget):
                 return edge
         return None
 
+    def _get_color(self, color_name: str) -> QColor:
+        """
+        Returns the given color, or its inverted version if invert_colors is True.
+        """
+        color = QColor(color_name)
+        if self.invert_colors:
+            # Invert by subtracting each channel from 255.
+            r = min(255 - color.red() + 50, 255)
+            g = min(255 - color.green() + 50, 255)
+            b = min(255 - color.blue() + 50, 255)
+            return QColor(r, g, b, color.alpha())
+        # TODO: Improve this color inversion, call it dark mode instead.
+        return color
+
+    def _get_menu_style_sheet(self) -> str:
+        if self.invert_colors:
+            bg_color = "rgb(0, 0, 0)"  # Dark background.
+            text_color = "#ffffff"
+            selected_color = "rgba(50, 50, 50, 230)"
+        else:
+            bg_color = "rgb(245, 245, 245)"  # Light background.
+            text_color = "#333333"
+            selected_color = "rgba(230, 230, 230, 230)"
+
+        return f"""
+            QMenu {{
+                background-color: {bg_color};
+                border: none;
+                border-radius: 5px;
+                padding: 5px;
+                margin: 0;
+                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                font-size: 12px;
+                color: {text_color};
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                background-color: transparent;
+                border: none;
+                border-radius: 5px;
+                color: {text_color};
+            }}
+            QMenu::item:selected {{
+                background-color: {selected_color};
+                color: {text_color};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: #dcdcdc;
+                margin: 5px 0;
+            }}
+        """
+
     def _toggle_crossings(self):
         self.show_crossings = not self.show_crossings
+
+    def _create_hamburger(self):
+        self.hamburger = QToolButton(self)
+        # Use the Unicode hamburger icon (or you can load a custom icon)
+        self.hamburger.setText("☰")
+        self.hamburger.setCursor(Qt.PointingHandCursor)
+        # Remove borders and background; let the style sheet handle appearance.
+        self.hamburger.setStyleSheet("""
+            QToolButton {
+                background: none;
+                border: none;
+                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                font-size: 18px;
+                color: %s;
+            }
+        """ % ("black" if not self.invert_colors else "white"))
+        self.hamburger.setFixedSize(30, 30)
+        self.hamburger.clicked.connect(self.open_hamburger_menu)
+        # Position it initially.
+        self._position_hamburger()
+
+    def _position_hamburger(self):
+        # Place the hamburger in the top right corner with a margin.
+        margin = 10
+        self.hamburger.move(self.width() - self.hamburger.width() - margin, margin)
