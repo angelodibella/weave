@@ -475,6 +475,9 @@ class Canvas(QWidget):
             self._drag_start_positions = {}
             self.update()
 
+        self.drag_start = None
+        self._drag_start_positions = {}
+
         super().mouseReleaseEvent(event)
 
     def save_to_file(self, filename):
