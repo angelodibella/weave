@@ -2,9 +2,9 @@ import json
 import math
 from typing import Any
 
-from PySide6.QtWidgets import QWidget, QMenu, QToolButton, QGraphicsDropShadowEffect
+from PySide6.QtWidgets import QWidget, QMenu, QToolButton, QWidgetAction, QHBoxLayout, QLabel, QCheckBox
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal
 
 from ..util.graph import find_edge_crossings, line_intersection
 
@@ -56,6 +56,43 @@ def _distance_point_to_segment(p: QPointF, a: QPointF, b: QPointF) -> float:
     proj_x = ax + t * dx
     proj_y = ay + t * dy
     return math.hypot(px - proj_x, py - proj_y)
+
+
+class ToggleSwitch(QWidget):
+    toggled = Signal(bool)
+
+    def __init__(self, checked=False, parent=None):
+        super().__init__(parent)
+        self._checked = checked
+        self.setFixedSize(40, 20)
+
+    def mousePressEvent(self, event):
+        self._checked = not self._checked
+        self.toggled.emit(self._checked)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+
+        # Draw background.
+        if self._checked:
+            painter.setBrush(QColor("#66bb6a"))
+        else:
+            painter.setBrush(QColor("#bfc0c0"))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+
+        # Draw the knob.
+        knob_radius = (rect.height() - 4) / 2
+        offset = 1
+        if self._checked:
+            knob_center = QPointF(rect.right() - knob_radius - 2, rect.center().y() + offset)
+        else:
+            knob_center = QPointF(rect.left() + knob_radius + 2, rect.center().y() + offset)
+        painter.setBrush(QColor("white"))
+        painter.drawEllipse(knob_center, knob_radius, knob_radius)
 
 
 class Canvas(QWidget):
@@ -337,7 +374,7 @@ class Canvas(QWidget):
         menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint)
         menu.setAttribute(Qt.WA_TranslucentBackground)
 
-        style = self._get_menu_style_sheet()
+        style = self._get_context_menu_style_sheet()
         menu.setStyleSheet(style)
 
         # Classical node options.
@@ -354,9 +391,6 @@ class Canvas(QWidget):
         quantum_menu.addAction("New Qubit", lambda: self.add_node_at(event.pos(), "qubit"))
         quantum_menu.addAction("New Z-Stabilizer", lambda: self.add_node_at(event.pos(), "Z_stabilizer"))
         quantum_menu.addAction("New X-Stabilizer", lambda: self.add_node_at(event.pos(), "X_stabilizer"))
-
-        # Toggle crossings.
-        menu.addAction("Toggle Crossings", lambda: self._toggle_crossings())
 
         # Save option.
         menu.addAction("Save Code as CSV", lambda: print("Save functionality not implemented yet."))
@@ -528,67 +562,72 @@ class Canvas(QWidget):
         self._position_hamburger()
 
     def open_hamburger_menu(self):
-        menu = QMenu(self)
-        # Make the menu frameless and translucent for rounded corners.
-        menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint)
-        menu.setAttribute(Qt.WA_TranslucentBackground)
-
-        # Choose style based on invert_colors.
-        if self.invert_colors:
-            bg_color = "rgba(0, 0, 0, 230)"  # dark background
-            text_color = "#ffffff"
-            selected_color = "rgba(50, 50, 50, 230)"
-        else:
-            bg_color = "rgba(255, 255, 255, 230)"  # light background
-            text_color = "#333333"
-            selected_color = "rgba(230, 230, 230, 230)"
-
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {bg_color};
+        # Change hamburger icon to a larger cross while the menu is open.
+        self.hamburger.setText("×")
+        self.hamburger.setStyleSheet(f"""
+            QToolButton {{
+                background: none;
                 border: none;
-                border-radius: 8px;
-                padding: 5px;
-                margin: 0;
                 font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 12px;
-                color: {text_color};
-            }}
-            QMenu::item {{
-                padding: 8px 20px;
-                background-color: transparent;
-                color: {text_color};
-            }}
-            QMenu::item:selected {{
-                background-color: {selected_color};
-                color: {text_color};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: #dcdcdc;
-                margin: 5px 0;
+                font-size: 28px;
+                color: {"black" if not self.invert_colors else "white"};
             }}
         """)
 
-        action_crossings = menu.addAction("Toggle Crossings")
-        action_invert = menu.addAction("Invert Colors")
+        # Store the menu in self._hamburger_menu so it can be updated later.
+        self._hamburger_menu = QMenu(self)
+        self._hamburger_menu.setWindowFlags(self._hamburger_menu.windowFlags() | Qt.FramelessWindowHint)
+        self._hamburger_menu.setAttribute(Qt.WA_TranslucentBackground)
+        self._hamburger_menu.setStyleSheet(self._get_hamburger_menu_style_sheet())
 
-        action = menu.exec(self.hamburger.mapToGlobal(self.hamburger.rect().bottomRight()))
-        if action == action_crossings:
-            self._toggle_crossings()
-        elif action == action_invert:
-            self.invert_colors = not self.invert_colors
-            self.update()  # Redraw canvas using new colors.
-            # Update hamburger button style.
-            self.hamburger.setStyleSheet("""
-                QToolButton {
-                    background: none;
-                    border: none;
-                    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                    font-size: 18px;
-                    color: %s;
-                }
-            """ % ("black" if not self.invert_colors else "white"))
+        # Add toggle switches.
+        toggle_show_crossings = self._create_toggle_widget("Show Crossings", self.show_crossings,
+                                                           self._set_show_crossings)
+        self._hamburger_menu.addAction(toggle_show_crossings)
+
+        toggle_dark_mode = self._create_toggle_widget("Dark Mode", self.invert_colors, self._set_dark_mode)
+        self._hamburger_menu.addAction(toggle_dark_mode)
+
+        # Add a separator.
+        self._hamburger_menu.addSeparator()
+
+        # Add Clear Canvas as a plain action.
+        self._hamburger_menu.addAction("Clear Canvas", self._clear_canvas)
+
+        # Add another separator.
+        self._hamburger_menu.addSeparator()
+
+        # Add a non-clickable Crossing Number widget.
+        crossing_widget = QWidget()
+        crossing_layout = QHBoxLayout(crossing_widget)
+        crossing_layout.setContentsMargins(8, 4, 8, 4)
+        text_color = "#ffffff" if self.invert_colors else "#333333"
+        crossing_label = QLabel(f"Crossings: {self._get_crossing_number()}")
+        crossing_label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {text_color};"
+        )
+        crossing_layout.addWidget(crossing_label)
+        crossing_layout.addStretch()
+        crossing_action = QWidgetAction(self)
+        crossing_action.setDefaultWidget(crossing_widget)
+        self._hamburger_menu.addAction(crossing_action)
+
+        # Position the menu further left (200 pixels offset).
+        pos = self.hamburger.mapToGlobal(QPointF(self.hamburger.rect().bottomRight()) - QPointF(315, -10)).toPoint()
+        self._hamburger_menu.exec(pos)
+        self._hamburger_menu = None  # Clear the reference once closed.
+
+        # Revert hamburger icon and style after the menu is closed.
+        self.hamburger.setText("☰")
+        self.hamburger.setStyleSheet(f"""
+            QToolButton {{
+                background: none;
+                border: none;
+                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                font-size: 18px;
+                color: {"black" if not self.invert_colors else "white"};
+            }}
+        """)
 
     def save_to_file(self, filename):
         """
@@ -795,16 +834,15 @@ class Canvas(QWidget):
         # TODO: Improve this color inversion, call it dark mode instead.
         return color
 
-    def _get_menu_style_sheet(self) -> str:
+    def _get_context_menu_style_sheet(self) -> str:
         if self.invert_colors:
-            bg_color = "rgb(0, 0, 0)"  # Dark background.
+            bg_color = "rgb(0, 0, 0)"
             text_color = "#ffffff"
             selected_color = "rgba(50, 50, 50, 230)"
         else:
-            bg_color = "rgb(245, 245, 245)"  # Light background.
+            bg_color = "rgb(245, 245, 245)"
             text_color = "#333333"
             selected_color = "rgba(230, 230, 230, 230)"
-
         return f"""
             QMenu {{
                 background-color: {bg_color};
@@ -815,6 +853,46 @@ class Canvas(QWidget):
                 font-family: "Segoe UI", "Helvetica Neue", sans-serif;
                 font-size: 12px;
                 color: {text_color};
+                min-width: 150px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                background-color: transparent;
+                border: none;
+                border-radius: 5px;
+                color: {text_color};
+            }}
+            QMenu::item:selected {{
+                background-color: {selected_color};
+                color: {text_color};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: #dcdcdc;
+                margin: 5px 0;
+            }}
+        """
+
+    def _get_hamburger_menu_style_sheet(self) -> str:
+        if self.invert_colors:
+            bg_color = "rgba(0, 0, 0, 230)"
+            text_color = "#ffffff"
+            selected_color = "rgba(50, 50, 50, 230)"
+        else:
+            bg_color = "rgba(245, 245, 245, 230)"
+            text_color = "#333333"
+            selected_color = "rgba(230, 230, 230, 230)"
+        return f"""
+            QMenu {{
+                background-color: {bg_color};
+                border: none;
+                border-radius: 5px;
+                padding: 5px;
+                margin: 0;
+                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                font-size: 12px;
+                color: {text_color};
+                min-width: 300px;
             }}
             QMenu::item {{
                 padding: 8px 20px;
@@ -861,3 +939,91 @@ class Canvas(QWidget):
         # Place the hamburger in the top right corner with a margin.
         margin = 10
         self.hamburger.move(self.width() - self.hamburger.width() - margin, margin)
+
+    def _set_show_crossings(self, checked: bool):
+        self.show_crossings = checked
+        self.update()
+
+    def _set_dark_mode(self, checked: bool):
+        self.invert_colors = checked
+        self.update()
+        # Update hamburger button style.
+        self.hamburger.setStyleSheet(f"""
+            QToolButton {{
+                background: none;
+                border: none;
+                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+                font-size: 18px;
+                color: {"black" if not self.invert_colors else "white"};
+            }}
+        """)
+        # If the hamburger menu is open, update its style and its child widgets.
+        if hasattr(self, "_hamburger_menu") and self._hamburger_menu is not None:
+            new_style = self._get_hamburger_menu_style_sheet()
+            self._hamburger_menu.setStyleSheet(new_style)
+            # Iterate through each action in the menu.
+            for action in self._hamburger_menu.actions():
+                if isinstance(action, QWidgetAction):
+                    widget = action.defaultWidget()
+                    if widget is not None:
+                        for label in widget.findChildren(QLabel):
+                            text_color = "#ffffff" if self.invert_colors else "#333333"
+                            label.setStyleSheet(
+                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; padding-left: 10px; color: {text_color};"
+                            )
+
+    def _get_crossing_number(self) -> int:
+        """Compute and return the number of quantum edge crossings."""
+        quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+        qnodes = {node['id']: node for node in self.nodes if node['type'] in quantum_types}
+        qedges = [edge for edge in self.edges
+                  if self.get_node_by_id(edge['source']) and self.get_node_by_id(edge['target'])
+                  and self.get_node_by_id(edge['source'])['type'] in quantum_types
+                  and self.get_node_by_id(edge['target'])['type'] in quantum_types]
+        if qnodes and qedges:
+            qnode_ids = list(qnodes.keys())
+            pos_list = [qnodes[node_id]['pos'] for node_id in qnode_ids]
+            edge_list = []
+            for edge in qedges:
+                try:
+                    i = qnode_ids.index(edge['source'])
+                    j = qnode_ids.index(edge['target'])
+                    edge_list.append((i, j))
+                except ValueError:
+                    continue
+            crossings = find_edge_crossings(pos_list, edge_list)
+            return len(crossings)
+        return 0
+
+    def _create_toggle_widget(self, label_text: str, initial: bool, callback):
+        from PySide6.QtWidgets import QWidgetAction, QWidget, QHBoxLayout, QLabel
+        widget = QWidget()
+        widget.setMinimumWidth(220)  # You might reduce this if you want smaller toggles.
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(5, 2, 5, 2)
+
+        # Use the new (smaller) ToggleSwitch widget if you haven't already adjusted its size.
+        toggle = ToggleSwitch(initial, widget)
+        toggle.setFixedSize(40, 20)  # Ensure the toggle is smaller.
+        toggle.toggled.connect(callback)
+
+        text_color = "#ffffff" if self.invert_colors else "#333333"
+        label = QLabel(label_text)
+        label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; padding-left: 10px; color: {text_color};"
+        )
+
+        # Add the toggle before the label.
+        layout.addWidget(toggle)
+        layout.addWidget(label)
+        layout.addStretch()
+
+        action = QWidgetAction(self)
+        action.setDefaultWidget(widget)
+        return action
+
+    def _clear_canvas(self):
+        """Clear all nodes and edges from the canvas."""
+        self.nodes = []
+        self.edges = []
+        self.update()
