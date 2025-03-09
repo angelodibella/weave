@@ -300,6 +300,11 @@ class Canvas(QWidget):
         Escape deselects all objects.
         Delete/Backspace removes selected nodes (and their edges) or selected edges.
         """
+        if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
+            for node in self.nodes:
+                node['selected'] = True
+            self.update()
+            return
         if event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
             self.zoom = 1.0
             self.update()
@@ -834,7 +839,7 @@ class Canvas(QWidget):
 
     def _create_hamburger(self):
         self.hamburger = QToolButton(self)
-        # Use the Unicode hamburger icon (or you can load a custom icon)
+        # Use the Unicode hamburger icon
         self.hamburger.setText("☰")
         self.hamburger.setCursor(Qt.PointingHandCursor)
         # Remove borders and background; let the style sheet handle appearance.
