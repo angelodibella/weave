@@ -29,7 +29,7 @@ class ToggleSwitch(QWidget):
     # Define the Qt property for animation.
     toggle_value = Property(float, get_value, set_value)
 
-    def setChecked(self, checked):
+    def set_checked(self, checked):
         if self._checked == checked:
             return
 
@@ -133,7 +133,7 @@ class MenuIcon(QWidget):
     # Define the Qt property for animation
     open_state = Property(float, get_open_state, set_open_state)
 
-    def setOpen(self, is_open):
+    def set_open(self, is_open):
         if self._is_open == is_open:
             return
 
