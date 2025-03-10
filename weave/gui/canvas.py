@@ -235,7 +235,7 @@ class Canvas(QWidget):
 
             # Keep hamburger icon in open state.
             if hasattr(self, 'hamburger'):
-                self.hamburger.setOpen(True)
+                self.hamburger.set_open(True)
 
     def _set_show_crossings(self, checked):
         self.show_crossings = checked
@@ -327,11 +327,11 @@ class Canvas(QWidget):
         """Toggle the hamburger menu open/closed state."""
         if self._hamburger_menu is None:
             # Create menu.
-            self.hamburger.setOpen(True)
+            self.hamburger.set_open(True)
             self._create_hamburger_menu()
         else:
             # Close menu.
-            self.hamburger.setOpen(False)
+            self.hamburger.set_open(False)
             self._hamburger_menu.close()
             self._hamburger_menu = None
 
@@ -727,7 +727,7 @@ class Canvas(QWidget):
                 (self.selection_rect[2] - self.selection_rect[0]) * self._zoom,
                 (self.selection_rect[3] - self.selection_rect[1]) * self._zoom
             )
-            painter.drawRoundedRect(rect, 8, 8)
+            painter.drawRoundedRect(rect, 5, 5)
             # Reset the brush to avoid affecting other drawing.
             painter.setBrush(Qt.NoBrush)
 
@@ -773,25 +773,25 @@ class Canvas(QWidget):
                     continue
 
                 src = QPointF(src_center.x() + dx / dist * margin_source,
-                                  src_center.y() + dy / dist * margin_source)
+                              src_center.y() + dy / dist * margin_source)
                 tgt = QPointF(tgt_center.x() - dx / dist * margin_target,
-                                  tgt_center.y() - dy / dist * margin_target)
+                              tgt_center.y() - dy / dist * margin_target)
             else:
                 src, tgt = src_center, tgt_center
 
             if edge.get('selected', False):
-                # TODO: Add better highlighting in dark mode.
-                highlight_size = 4
+                highlight_size = 5
                 highlight_color = self.theme_manager.selected
                 highlight_color.setAlpha(40)
 
                 pen = QPen(highlight_color, highlight_size)
                 pen.setCapStyle(Qt.FlatCap)
                 painter.setPen(pen)
-
                 painter.drawLine(src, tgt)
 
-            pen = QPen(self.theme_manager.foreground, 0.8)
+            color = self.theme_manager.selected if edge.get('selected', False) else self.theme_manager.foreground
+            color.setAlpha(255)
+            pen = QPen(color, 0.8)
             pen.setCapStyle(Qt.FlatCap)
             painter.setPen(pen)
 
@@ -894,8 +894,8 @@ class Canvas(QWidget):
                 if node_type == "bit" or node_type == "qubit":
                     painter.drawEllipse(QPointF(x, y), r + highlight_size, r + highlight_size)
                 else:
-                    painter.drawRect(QRectF(x - l / 2 - highlight_size, y - l / 2 - highlight_size,
-                                            l + 2 * highlight_size, l + 2 * highlight_size))
+                    painter.drawRoundedRect(QRectF(x - l / 2 - highlight_size, y - l / 2 - highlight_size,
+                                                   l + 2 * highlight_size, l + 2 * highlight_size), 1, 1)
 
             # Draw the actual node.
             if node_type in {"bit", "parity_check"}:
@@ -1161,7 +1161,7 @@ class Canvas(QWidget):
 
     def _on_menu_hide(self):
         if hasattr(self, 'hamburger'):
-            self.hamburger.setOpen(False)
+            self.hamburger.set_open(False)
         self._hamburger_menu = None
 
     def _create_custom_toggle(self, label_text, initial, callback):
