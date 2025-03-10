@@ -127,7 +127,7 @@ class Canvas(QWidget):
         self.create_hamburger_menu()
 
     # ------------------------------------------------------------
-    # Property getters and setters
+    # Property Getters and Setters
     # ------------------------------------------------------------
 
     def get_zoom(self):
@@ -151,7 +151,7 @@ class Canvas(QWidget):
     pan_offset = Property(QPointF, get_view_offset, set_view_offset)
 
     # ------------------------------------------------------------
-    # Animation setup
+    # Animations
     # ------------------------------------------------------------
 
     def _setup_animations(self):
@@ -307,7 +307,7 @@ class Canvas(QWidget):
         self.smooth_zoom_to(new_zoom, event.position())
 
     # ------------------------------------------------------------
-    # Hamburger Menu Methods
+    # Main Menu
     # ------------------------------------------------------------
 
     def create_hamburger_menu(self):
@@ -749,9 +749,6 @@ class Canvas(QWidget):
         painter.restore()
 
     def _draw_edges(self, painter):
-        # Draw a subtle shadow for all edges first.
-        shadow_color = QColor(0, 0, 0, 30)
-        shadow_offset = 0.5
         for edge in self.edges:
             source = self.get_node_by_id(edge['source'])
             target = self.get_node_by_id(edge['target'])
@@ -761,69 +758,44 @@ class Canvas(QWidget):
             src_center = QPointF(source['pos'][0], source['pos'][1])
             tgt_center = QPointF(target['pos'][0], target['pos'][1])
 
-            # Draw shadow first.
-            pen = QPen(shadow_color, 1.2)
-            painter.setPen(pen)
-            src_shadow = QPointF(src_center.x() + shadow_offset, src_center.y() + shadow_offset)
-            tgt_shadow = QPointF(tgt_center.x() + shadow_offset, tgt_center.y() + shadow_offset)
-            painter.drawLine(src_shadow, tgt_shadow)
-
-        # Draw the actual edges.
-        for edge in self.edges:
-            if edge.get('selected', False):
-                pen = QPen(self.theme_manager.selected, 1.2)
-            else:
-                # Get color based on node types.
-                source = self.get_node_by_id(edge['source'])
-                target = self.get_node_by_id(edge['target'])
-                if source is None or target is None:
+            # Check if the nodes are quantum: no clipping prevention is necessary.
+            if source["type"] in {"bit", "parity_check"} and target["type"] in {"bit", "parity_check"}:
+                dx = tgt_center.x() - src_center.x()
+                dy = tgt_center.y() - src_center.y()
+                dist = math.hypot(dx, dy)
+                if dist == 0:
                     continue
 
-                if source["type"] in {"bit", "parity_check"} or target["type"] in {"bit", "parity_check"}:
-                    pen = QPen(self.theme_manager.foreground, 0.8)
-                else:
-                    # For quantum edges, use a gradient of the node colors.
-                    source_color = self.theme_manager.get_node_color(source["type"])
-                    target_color = self.theme_manager.get_node_color(target["type"])
+                # Compute margins so edges begin at node boundaries.
+                margin_source = self._get_margin(source, dx, dy)
+                margin_target = self._get_margin(target, -dx, -dy)
+                if margin_source + margin_target > dist:
+                    continue
 
-                    # Create a linear gradient for the edge.
-                    gradient = QLinearGradient(
-                        source['pos'][0], source['pos'][1],
-                        target['pos'][0], target['pos'][1]
-                    )
-                    gradient.setColorAt(0, source_color)
-                    gradient.setColorAt(1, target_color)
+                src = QPointF(src_center.x() + dx / dist * margin_source,
+                                  src_center.y() + dy / dist * margin_source)
+                tgt = QPointF(tgt_center.x() - dx / dist * margin_target,
+                                  tgt_center.y() - dy / dist * margin_target)
+            else:
+                src, tgt = src_center, tgt_center
 
-                    pen = QPen(QBrush(gradient), 1.2)
+            if edge.get('selected', False):
+                # TODO: Add better highlighting in dark mode.
+                highlight_size = 4
+                highlight_color = self.theme_manager.selected
+                highlight_color.setAlpha(40)
 
-            pen.setCapStyle(Qt.RoundCap)
+                pen = QPen(highlight_color, highlight_size)
+                pen.setCapStyle(Qt.FlatCap)
+                painter.setPen(pen)
+
+                painter.drawLine(src, tgt)
+
+            pen = QPen(self.theme_manager.foreground, 0.8)
+            pen.setCapStyle(Qt.FlatCap)
             painter.setPen(pen)
 
-            src_center = QPointF(source['pos'][0], source['pos'][1])
-            tgt_center = QPointF(target['pos'][0], target['pos'][1])
-
-            # Check if the nodes are quantum: no clipping prevention is necessary.
-            if source["type"] not in {"bit", "parity_check"}:
-                painter.drawLine(src_center, tgt_center)
-                continue
-
-            dx = tgt_center.x() - src_center.x()
-            dy = tgt_center.y() - src_center.y()
-            dist = math.hypot(dx, dy)
-            if dist == 0:
-                continue
-
-            # Compute margins so edges begin at node boundaries.
-            margin_source = self._get_margin(source, dx, dy)
-            margin_target = self._get_margin(target, -dx, -dy)
-            if margin_source + margin_target > dist:
-                continue
-
-            new_src = QPointF(src_center.x() + dx / dist * margin_source,
-                              src_center.y() + dy / dist * margin_source)
-            new_tgt = QPointF(tgt_center.x() - dx / dist * margin_target,
-                              tgt_center.y() - dy / dist * margin_target)
-            painter.drawLine(new_src, new_tgt)
+            painter.drawLine(src, tgt)
 
     def _draw_crossings(self, painter):
         # Filter quantum nodes and edges.
@@ -878,15 +850,6 @@ class Canvas(QWidget):
             if ip is not None:
                 size = 4  # size of the square in world units
 
-                # Draw a shadow first.
-                painter.save()
-                painter.translate(ip[0] + 0.5, ip[1] + 0.5)
-                painter.rotate(45)
-                painter.setBrush(QColor(0, 0, 0, 80))
-                painter.setPen(Qt.NoPen)
-                painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
-                painter.restore()
-
                 # Draw the diamond.
                 painter.save()
                 painter.translate(ip[0], ip[1])
@@ -914,27 +877,16 @@ class Canvas(QWidget):
             # Determine if node is selected.
             is_selected = node.get('selected', False)
 
-            # Draw shadow first.
-            shadow_color = QColor(0, 0, 0, 50)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(shadow_color)
-            shadow_offset = 1  # shadow offset in world units
-
-            if node_type == "bit":
-                painter.drawEllipse(QPointF(x + shadow_offset, y + shadow_offset), r, r)
-            else:
-                # Square/rectangle nodes.
-                painter.drawRect(QRectF(x - l / 2 + shadow_offset, y - l / 2 + shadow_offset, l, l))
-
             # Set node color and pen.
             node_color = self.theme_manager.get_node_color(node_type)
+            pen = QPen(self.theme_manager.foreground, 1)
 
             # Draw selection highlight if selected.
             if is_selected:
                 # Draw a bigger highlight circle/square behind the node.
-                highlight_size = 2  # pixels wider than the node
+                highlight_size = 2
                 highlight_color = self.theme_manager.selected
-                highlight_color.setAlpha(100)  # semi-transparent
+                highlight_color.setAlpha(40)
 
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(highlight_color)
@@ -942,14 +894,8 @@ class Canvas(QWidget):
                 if node_type == "bit" or node_type == "qubit":
                     painter.drawEllipse(QPointF(x, y), r + highlight_size, r + highlight_size)
                 else:
-                    # Square nodes.
                     painter.drawRect(QRectF(x - l / 2 - highlight_size, y - l / 2 - highlight_size,
                                             l + 2 * highlight_size, l + 2 * highlight_size))
-
-                # Also use a selection outline.
-                pen = QPen(self.theme_manager.selected, 1.5)
-            else:
-                pen = QPen(self.theme_manager.foreground, 0.8)
 
             # Draw the actual node.
             if node_type in {"bit", "parity_check"}:
@@ -963,21 +909,13 @@ class Canvas(QWidget):
                     painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
             else:
                 # Quantum nodes have fills.
-                if is_selected:
-                    painter.setPen(pen)
-                else:
-                    painter.setPen(Qt.NoPen)
-
-                # Use gradients for quantum nodes.
-                gradient = QRadialGradient(x, y, r * 1.2)
-                gradient.setColorAt(0, node_color.lighter(120))
-                gradient.setColorAt(1, node_color)
-                painter.setBrush(gradient)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(node_color)
 
                 if node_type == "qubit":
                     painter.drawEllipse(QPointF(x, y), r, r)
                 else:  # Z or X stabilizer
-                    painter.drawRoundedRect(QRectF(x - l / 2, y - l / 2, l, l), 2, 2)
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
 
             # Reset brush for next node.
             painter.setBrush(Qt.NoBrush)
@@ -1083,8 +1021,8 @@ class Canvas(QWidget):
             dist = math.hypot(dx, dy)
             cos_theta = abs(dx) / dist
             sin_theta = abs(dy) / dist
-            epsilon = 0.25
-            return r / max(cos_theta, sin_theta) + epsilon
+            epsilon = 0.5
+            return r / max(cos_theta, sin_theta) - epsilon
 
     def _get_node_at(self, pos):
         """
