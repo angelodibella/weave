@@ -2,10 +2,13 @@ import json
 import math
 from typing import Any
 
-from PySide6.QtWidgets import QWidget, QMenu, QToolButton, QWidgetAction, QHBoxLayout, QLabel, QCheckBox
-from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel
+from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent, QRadialGradient, QIcon, QPixmap, \
+    QLinearGradient, QBrush
+from PySide6.QtCore import Qt, QPointF, QRectF, QPropertyAnimation, QEasingCurve, Property
 
+from .theme import ThemeManager
+from .components import ToggleSwitch, MenuIcon
 from ..util.graph import find_edge_crossings, line_intersection
 
 
@@ -58,49 +61,12 @@ def _distance_point_to_segment(p: QPointF, a: QPointF, b: QPointF) -> float:
     return math.hypot(px - proj_x, py - proj_y)
 
 
-class ToggleSwitch(QWidget):
-    toggled = Signal(bool)
-
-    def __init__(self, checked=False, parent=None):
-        super().__init__(parent)
-        self._checked = checked
-        self.setFixedSize(40, 20)
-
-    def mousePressEvent(self, event):
-        self._checked = not self._checked
-        self.toggled.emit(self._checked)
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = self.rect()
-
-        # Draw background.
-        if self._checked:
-            painter.setBrush(QColor("#66bb6a"))
-        else:
-            painter.setBrush(QColor("#bfc0c0"))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
-
-        # Draw the knob.
-        knob_radius = (rect.height() - 4) / 2
-        offset = 1
-        if self._checked:
-            knob_center = QPointF(rect.right() - knob_radius - 2, rect.center().y() + offset)
-        else:
-            knob_center = QPointF(rect.left() + knob_radius + 2, rect.center().y() + offset)
-        painter.setBrush(QColor("white"))
-        painter.drawEllipse(knob_center, knob_radius, knob_radius)
-
-
 class Canvas(QWidget):
     """
     An interactive canvas for editing quantum error-correcting codes.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, dark_mode=False):
         """
         Initialize the canvas.
 
@@ -108,9 +74,14 @@ class Canvas(QWidget):
         ----------
         parent : QWidget, optional
             The parent widget (default is None).
+        dark_mode : bool, optional
+            Whether to start in dark mode (default is False).
         """
         super().__init__(parent)
         self.setFocusPolicy(Qt.StrongFocus)
+
+        # Initialize theme manager.
+        self.theme_manager = ThemeManager(dark_mode=dark_mode)
 
         # World model: nodes and edges.
         # Each node is a dict: {'id', 'pos', 'type', 'selected'}
@@ -120,8 +91,8 @@ class Canvas(QWidget):
         self.node_radius = 10
 
         # View transformation parameters.
-        self.view_offset = QPointF(0, 0)  # in widget coordinates
-        self.zoom = 1.0
+        self._view_offset = QPointF(0, 0)  # in widget coordinates
+        self._zoom = 1.0
 
         # State for panning and dragging.
         self.pan_active = False
@@ -129,224 +100,177 @@ class Canvas(QWidget):
         self.dragged_node = None
         self.drag_offset = QPointF(0, 0)
 
-        self.selecting = False  # Whether a rectangular selection is active.
-        self.selection_rect_start = None  # The starting world coordinate of the selection.
-        self.selection_rect = None  # Current selection rectangle (x_min, y_min, x_max, y_max).
-        self.selection_mode = None  # "node" or "edge" selection mode.
+        # Selection state.
+        self.selecting = False  # whether a rectangular selection is active
+        self.selection_rect_start = None  # the starting world coordinate of the selection
+        self.selection_rect = None  # current selection rectangle (x_min, y_min, x_max, y_max)
+        self.selection_mode = None  # "node" or "edge" selection mode
 
-        self.drag_start = None  # World coordinate of the start of a drag.
-        self._drag_start_positions = {}  # Dictionary to store initial positions of selected nodes when starting a drag.
+        # Drag state.
+        self.drag_start = None  # world coordinate of the start of a drag
+        self._drag_start_positions = {}  # dictionary to store initial positions of selected nodes when starting a drag
 
-        self.shift_pending_toggle = None  # Will hold a reference to the node pending deselection.
+        # Selection state.
+        self.shift_pending_toggle = None  # will hold a reference to the node pending deselection
+        self._shift_press_node = None  # store node clicked with shift
+        self._shift_press_pos = None  # store position of shift-click
+        self._shift_press_was_selected = False  # store node's selection state before shift-click
 
+        # Display options.
         self.show_crossings = True
 
-        self.invert_colors = False
-        self._create_hamburger()
+        # Initialize animations.
+        self._setup_animations()
 
-    def paintEvent(self, event):
+        # Create hamburger menu.
+        self._hamburger_menu = None
+        self.create_hamburger_menu()
+
+    # ------------------------------------------------------------
+    # Property getters and setters
+    # ------------------------------------------------------------
+
+    def get_zoom(self):
+        return self._zoom
+
+    def set_zoom(self, value):
+        self._zoom = value
+        self.update()
+
+    # Define the zoom property for Qt animation.
+    zoom_level = Property(float, get_zoom, set_zoom)
+
+    def get_view_offset(self):
+        return self._view_offset
+
+    def set_view_offset(self, value):
+        self._view_offset = value
+        self.update()
+
+    # Define the view_offset property for Qt animation.
+    pan_offset = Property(QPointF, get_view_offset, set_view_offset)
+
+    # ------------------------------------------------------------
+    # Animation setup
+    # ------------------------------------------------------------
+
+    def _setup_animations(self):
+        """Setup animations for UI elements."""
+        # Zoom animation.
+        self._zoom_animation = QPropertyAnimation(self, b"zoom_level")
+        self._zoom_animation.setDuration(150)
+        self._zoom_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        # Pan animation.
+        self._pan_animation = QPropertyAnimation(self, b"pan_offset")
+        self._pan_animation.setDuration(150)
+        self._pan_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+    def smooth_zoom_to(self, new_zoom, center_pos=None):
         """
-        Draw the grid, nodes, and edges.
+        Smoothly zoom to a new level with animation.
 
-        The grid is rendered in widget coordinates as a continuous triangular lattice.
-        World objects (nodes and edges) are drawn with the current view_offset and zoom.
+        Parameters
+        ----------
+        new_zoom : float
+            Target zoom level.
+        center_pos : QPointF, optional
+            Center point for the zoom operation. If None, uses widget center.
         """
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), self._get_color("white"))
+        if center_pos is None:
+            center_pos = QPointF(self.width() / 2, self.height() / 2)
 
-        # ----- Draw grid (triangular lattice) in widget coordinates -----
-        spacing = 20
-        dot_radius = 1
-        painter.setPen(QPen(self._get_color("lightgray")))
+        old_zoom = self._zoom
 
-        # Compute grid indices from view_offset and widget dimensions.
-        vox = self.view_offset.x()
-        voy = self.view_offset.y()
-        width = self.width()
-        height = self.height()
-        min_n = math.floor((-vox) / spacing)
-        max_n = math.ceil((width - vox) / spacing)
-        min_m = math.floor((-voy) / spacing)
-        max_m = math.ceil((height - voy) / spacing)
-        for m in range(min_m, max_m + 1):
-            y = m * spacing + voy
-            row_offset = spacing / 2 if (m % 2 != 0) else 0
-            for n in range(min_n, max_n + 1):
-                x = n * spacing + vox + row_offset
-                painter.drawEllipse(QPointF(x, y), dot_radius, dot_radius)
+        # Calculate the world point under the cursor.
+        world_point = QPointF(
+            (center_pos.x() - self._view_offset.x()) / old_zoom,
+            (center_pos.y() - self._view_offset.y()) / old_zoom
+        )
 
-        # Draw selection area.
-        if self.selecting and self.selection_rect is not None:
-            painter.setPen(Qt.NoPen)
-            # Create a light gray color with 50% transparency.
-            selection_color = self._get_color(QColor(211, 211, 211).name())
-            selection_color.setAlpha(128)
-            painter.setBrush(selection_color)
-            # Convert world coordinates back to widget coordinates.
-            rect = QRectF(
-                self.selection_rect[0] * self.zoom + self.view_offset.x(),
-                self.selection_rect[1] * self.zoom + self.view_offset.y(),
-                (self.selection_rect[2] - self.selection_rect[0]) * self.zoom,
-                (self.selection_rect[3] - self.selection_rect[1]) * self.zoom
-            )
-            painter.drawRoundedRect(rect, 5, 5)
-            # Reset the brush to avoid affecting other drawing.
-            painter.setBrush(Qt.NoBrush)
+        # Calculate new view offset to keep world point fixed.
+        new_offset = center_pos - world_point * new_zoom
 
-        # ----- Draw world objects (nodes and edges) -----
-        painter.save()
-        painter.translate(self.view_offset)
-        painter.scale(self.zoom, self.zoom)
+        # Stop any running animations.
+        self._zoom_animation.stop()
+        self._pan_animation.stop()
 
-        # Draw edges with thin pen and clipped to node perimeters.
-        for edge in self.edges:
-            pen = QPen(self._get_color("green") if edge.get('selected', False) else self._get_color("black"), 0.8)
-            painter.setPen(pen)
+        # Setup and start zoom animation.
+        self._zoom_animation.setStartValue(old_zoom)
+        self._zoom_animation.setEndValue(new_zoom)
 
-            source = self.get_node_by_id(edge['source'])
-            target = self.get_node_by_id(edge['target'])
-            if source is None or target is None:
-                continue
+        # Setup and start pan animation.
+        self._pan_animation.setStartValue(self._view_offset)
+        self._pan_animation.setEndValue(new_offset)
 
-            src_center = QPointF(source['pos'][0], source['pos'][1])
-            tgt_center = QPointF(target['pos'][0], target['pos'][1])
+        # Start animations together.
+        self._zoom_animation.start()
+        self._pan_animation.start()
 
-            # Check if the nodes are quantum: no clipping prevention is necessary.
-            if source["type"] not in {"bit", "parity_check"}:
-                painter.drawLine(src_center, tgt_center)
-                continue
+    def _set_dark_mode(self, checked):
+        # Remember if the hamburger menu was open.
+        hamburger_was_open = self._hamburger_menu is not None
 
-            dx = tgt_center.x() - src_center.x()
-            dy = tgt_center.y() - src_center.y()
-            dist = math.hypot(dx, dy)
-            if dist == 0:
-                continue
+        # Update theme.
+        self.theme_manager.set_dark_mode(checked)
 
-            # Compute margins so edges begin at node boundaries.
-            margin_source = self._get_margin(source, dx, dy)
-            margin_target = self._get_margin(target, -dx, -dy)
-            if margin_source + margin_target > dist:
-                continue
+        # Force widget update to reflect new colors.
+        self.update()
 
-            new_src = QPointF(src_center.x() + dx / dist * margin_source,
-                              src_center.y() + dy / dist * margin_source)
-            new_tgt = QPointF(tgt_center.x() - dx / dist * margin_target,
-                              tgt_center.y() - dy / dist * margin_target)
-            painter.drawLine(new_src, new_tgt)
+        # Only close and reopen the menu if it was open.
+        if hamburger_was_open:
+            # Store the menu position before closing.
+            menu_pos = None
+            if self._hamburger_menu:
+                menu_pos = self._hamburger_menu.pos()
+                self._hamburger_menu.close()
 
-        # Draw quantum crossings if enabled.
-        if self.show_crossings:
-            # Filter quantum nodes and edges.
-            quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
-            qnodes = {node['id']: node for node in self.nodes if node['type'] in quantum_types}
-            qedges = [edge for edge in self.edges
-                      if self.get_node_by_id(edge['source']) and self.get_node_by_id(edge['target'])
-                      and self.get_node_by_id(edge['source'])['type'] in quantum_types
-                      and self.get_node_by_id(edge['target'])['type'] in quantum_types]
-            if qnodes and qedges:
-                # Build a mapping from quantum node id to a continuous index and a list of positions.
-                qnode_ids = list(qnodes.keys())
-                id_to_index = {node_id: i for i, node_id in enumerate(qnode_ids)}
-                pos_list = [qnodes[node_id]['pos'] for node_id in qnode_ids]
+            # Recreate the menu with new theme.
+            self._hamburger_menu = None
+            self._create_hamburger_menu()
 
-                # Build edge list as tuples of indices.
-                edge_list = []
-                for edge in qedges:
-                    i = id_to_index[edge['source']]
-                    j = id_to_index[edge['target']]
-                    edge_list.append((i, j))
+            # Restore menu position if we had one.
+            if menu_pos:
+                self._hamburger_menu.move(menu_pos)
 
-                # For each crossing, compute approximate intersection and draw a diamond.
-                crossings = find_edge_crossings(pos_list, edge_list)
-                for crossing in crossings:
-                    # Each crossing is a frozenset of two edges, extract them.
-                    edge_pair = list(crossing)
-                    e1, e2 = edge_pair[0], edge_pair[1]
+            # Keep hamburger icon in open state.
+            if hasattr(self, 'hamburger'):
+                self.hamburger.setOpen(True)
 
-                    # Get the endpoints (in world coordinates) for each edge.
-                    def get_endpoints(e):
-                        n1 = qnodes[qnode_ids[e[0]]]['pos']
-                        n2 = qnodes[qnode_ids[e[1]]]['pos']
-                        return n1, n2
-
-                    a, b = get_endpoints(e1)
-                    c, d = get_endpoints(e2)
-                    ip = line_intersection(a, b, c, d)
-                    if ip is not None:
-                        size = 4  # size of the square in world units
-                        painter.save()
-                        painter.translate(ip[0], ip[1])
-                        painter.rotate(45)
-                        painter.setBrush(self._get_color("black"))
-                        painter.setPen(Qt.NoPen)
-                        painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
-                        painter.restore()
-
-        # Draw nodes.
-        for node in self.nodes:
-            x = node['pos'][0]
-            y = node['pos'][1]
-            r = self.node_radius
-            l = 1.86 * r
-            node_type = node['type']
-            if node_type in {"bit", "parity_check"}:
-                pen = QPen(self._get_color("green"), 1) if node.get('selected', False) else self._get_color("black")
-                painter.setPen(pen)
-                if node_type == "bit":
-                    painter.drawEllipse(QPointF(x, y), r, r)
-                else:
-                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-            else:
-                pen = QPen(self._get_color("green"), 1) if node.get('selected', False) else Qt.NoPen
-                painter.setPen(pen)
-                if node_type == "qubit":
-                    painter.setBrush(self._get_color("#D3D3D3"))
-                    painter.drawEllipse(QPointF(x, y), r, r)
-                elif node_type == "Z_stabilizer":
-                    painter.setBrush(self._get_color("#ADD8E6"))
-                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-                elif node_type == "X_stabilizer":
-                    painter.setBrush(self._get_color("#FFC0CB"))
-                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
-                painter.setBrush(Qt.NoBrush)
-
-        painter.restore()
-
-    def wheelEvent(self, event: QWheelEvent):
-        """
-        Zoom the view relative to the cursor position.
-
-        The view_offset is adjusted so that the world point under the cursor remains fixed.
-        """
-        old_zoom = self.zoom
-        delta = event.angleDelta().y()
-        factor = 1.05 if delta > 0 else 0.95
-        new_zoom = old_zoom * factor
-        new_zoom = max(0.2, min(new_zoom, 5.0))
-        cursor_pos = event.position()  # QPointF
-        self.view_offset = cursor_pos - (new_zoom / old_zoom) * (cursor_pos - self.view_offset)
-        self.zoom = new_zoom
+    def _set_show_crossings(self, checked):
+        self.show_crossings = checked
         self.update()
 
     def keyPressEvent(self, event: QKeyEvent):
         """
-        Handle key events.
-
-        Ctrl+0 resets zoom to default.
-        Escape deselects all objects.
-        Delete/Backspace removes selected nodes (and their edges) or selected edges.
+        Ctrl+0: Reset zoom to default.
+        Ctrl+=: Zoom in.
+        Ctrl+-: Zoom out.
+        Ctrl+A: Select all nodes.
+        Escape: Deselect all objects.
+        Delete/Backspace: Remove selected nodes/edges.
         """
         if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
+            # Select all nodes.
             for node in self.nodes:
                 node['selected'] = True
             self.update()
             return
-        if event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
-            self.zoom = 1.0
-            self.update()
+        elif event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
+            # Reset zoom with animation.
+            self.smooth_zoom_to(1.0)
             return
-        if event.key() == Qt.Key_Escape:
+        elif event.key() == Qt.Key_Equal and event.modifiers() & Qt.ControlModifier:
+            # Zoom in with animation.
+            new_zoom = min(self._zoom * 1.2, 5.0)
+            self.smooth_zoom_to(new_zoom)
+            return
+        elif event.key() == Qt.Key_Minus and event.modifiers() & Qt.ControlModifier:
+            # Zoom out with animation.
+            new_zoom = max(self._zoom / 1.2, 0.2)
+            self.smooth_zoom_to(new_zoom)
+            return
+        elif event.key() == Qt.Key_Escape:
             self._deselect_all()
         elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             selected_nodes = self._get_selected_nodes()
@@ -363,18 +287,226 @@ class Canvas(QWidget):
                         self.edges.remove(edge)
                     self._deselect_all()
             self.update()
+
         self.update()
         super().keyPressEvent(event)
 
+    def wheelEvent(self, event: QWheelEvent):
+        delta = event.angleDelta().y()
+        factor = 1.1 if delta > 0 else 0.9
+
+        # Calculate new zoom level within limits.
+        new_zoom = self._zoom * factor
+        new_zoom = max(0.2, min(new_zoom, 5.0))
+
+        # Don't animate tiny changes.
+        if abs(new_zoom - self._zoom) < 0.01:
+            return
+
+        # Perform smooth zoom centered on cursor.
+        self.smooth_zoom_to(new_zoom, event.position())
+
+    # ------------------------------------------------------------
+    # Hamburger Menu Methods
+    # ------------------------------------------------------------
+
+    def create_hamburger_menu(self):
+        """Create the hamburger menu button."""
+        # Remove old hamburger if it exists.
+        if hasattr(self, 'hamburger'):
+            self.hamburger.deleteLater()
+
+        # Create new modern hamburger icon.
+        self.hamburger = MenuIcon(self, self.theme_manager)
+        self.hamburger.clicked.connect(self.toggle_hamburger_menu)
+
+        # Position the hamburger.
+        self._position_hamburger()
+
+    def toggle_hamburger_menu(self):
+        """Toggle the hamburger menu open/closed state."""
+        if self._hamburger_menu is None:
+            # Create menu.
+            self.hamburger.setOpen(True)
+            self._create_hamburger_menu()
+        else:
+            # Close menu.
+            self.hamburger.setOpen(False)
+            self._hamburger_menu.close()
+            self._hamburger_menu = None
+
+    def _create_hamburger_menu(self):
+        """Create and display the hamburger menu."""
+        self._hamburger_menu = QMenu(self)
+        self._hamburger_menu.setWindowFlags(self._hamburger_menu.windowFlags() | Qt.FramelessWindowHint)
+        self._hamburger_menu.setAttribute(Qt.WA_TranslucentBackground)
+        self._hamburger_menu.setStyleSheet(self.theme_manager.get_menu_style())
+
+        # Connect to aboutToHide to ensure hamburger icon resets when menu closes.
+        self._hamburger_menu.aboutToHide.connect(self._on_menu_hide)
+
+        # Create actions for toggles.
+        crossings_widget = QWidget()
+        crossings_layout = QHBoxLayout(crossings_widget)
+        crossings_layout.setContentsMargins(8, 4, 8, 4)
+
+        crossings_label = QLabel("Show Crossings")
+        crossings_label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
+        )
+
+        # Create an explicitly initialized toggle for show crossings.
+        self.crossings_toggle = ToggleSwitch(self.show_crossings, crossings_widget)
+        self.crossings_toggle.toggled.connect(self._on_crossings_toggled)
+
+        crossings_layout.addWidget(crossings_label)
+        crossings_layout.addStretch()
+        crossings_layout.addWidget(self.crossings_toggle)
+
+        crossings_action = QWidgetAction(self)
+        crossings_action.setDefaultWidget(crossings_widget)
+        self._hamburger_menu.addAction(crossings_action)
+
+        # Create dark mode toggle widget.
+        dark_mode_widget = QWidget()
+        dark_mode_layout = QHBoxLayout(dark_mode_widget)
+        dark_mode_layout.setContentsMargins(8, 4, 8, 4)
+
+        dark_mode_label = QLabel("Dark Mode")
+        dark_mode_label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
+        )
+
+        # Explicitly create a new toggle switch with the current theme state.
+        self.dark_mode_toggle = ToggleSwitch(self.theme_manager.dark_mode, dark_mode_widget)
+        self.dark_mode_toggle.toggled.connect(self._on_dark_mode_toggled)
+
+        dark_mode_layout.addWidget(dark_mode_label)
+        dark_mode_layout.addStretch()
+        dark_mode_layout.addWidget(self.dark_mode_toggle)
+
+        dark_mode_action = QWidgetAction(self)
+        dark_mode_action.setDefaultWidget(dark_mode_widget)
+        self._hamburger_menu.addAction(dark_mode_action)
+
+        # Add a separator.
+        self._hamburger_menu.addSeparator()
+
+        # Add Clear Canvas action.
+        clear_action = self._hamburger_menu.addAction("Clear Canvas", self._clear_canvas)
+        clear_action.setIcon(self._get_clear_icon())
+
+        # Add separator.
+        self._hamburger_menu.addSeparator()
+
+        # Add crossing number display.
+        crossing_widget = QWidget()
+        crossing_layout = QHBoxLayout(crossing_widget)
+        crossing_layout.setContentsMargins(8, 4, 8, 4)
+
+        crossing_label = QLabel(f"Crossings: {self._get_crossing_number()}")
+        crossing_label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
+        )
+        crossing_layout.addWidget(crossing_label)
+        crossing_layout.addStretch()
+
+        crossing_action = QWidgetAction(self)
+        crossing_action.setDefaultWidget(crossing_widget)
+        self._hamburger_menu.addAction(crossing_action)
+
+        # Position and show the menu.
+        hamburger_bottom_right = self.hamburger.mapToGlobal(
+            QPointF(self.hamburger.width(), self.hamburger.height()).toPoint())
+        pos = QPointF(hamburger_bottom_right.x() - self._hamburger_menu.sizeHint().width(),
+                      hamburger_bottom_right.y() + 5).toPoint()
+        self._hamburger_menu.popup(pos)
+
+    def _create_toggle_widget(self, label_text, initial, callback):
+        """
+        Create a toggle widget with label.
+
+        Parameters
+        ----------
+        label_text : str
+            Text label for the toggle.
+        initial : bool
+            Initial state of the toggle.
+        callback : function
+            Function to call when toggle state changes.
+
+        Returns
+        -------
+        QWidgetAction
+            The widget action for the menu.
+        """
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(8, 4, 8, 4)
+
+        # Create label first.
+        label = QLabel(label_text)
+        label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
+        )
+
+        # Create toggle with explicit starting state.
+        toggle = ToggleSwitch(initial, widget)
+        toggle.toggled.connect(callback)
+
+        # Add label and toggle in correct order (label on left, toggle on right).
+        layout.addWidget(label)
+        layout.addStretch()
+        layout.addWidget(toggle)
+
+        action = QWidgetAction(self)
+        action.setDefaultWidget(widget)
+        return action
+
+    # TODO: Switch to icon files as assets.
+    def _get_clear_icon(self):
+        """Create a clear/trash icon for the menu."""
+        icon = QIcon()
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw a simple trash can icon.
+        painter.setPen(QPen(self.theme_manager.foreground, 1))
+        painter.setBrush(Qt.NoBrush)
+
+        # Draw the trash can body.
+        painter.drawRect(4, 5, 8, 9)
+
+        # Draw the lid.
+        painter.drawLine(3, 5, 13, 5)
+
+        # Draw the handle.
+        painter.drawLine(6, 3, 10, 3)
+        painter.drawLine(6, 3, 6, 5)
+        painter.drawLine(10, 3, 10, 5)
+
+        # Draw lines inside to represent trash.
+        painter.drawLine(6, 7, 6, 12)
+        painter.drawLine(8, 7, 8, 12)
+        painter.drawLine(10, 7, 10, 12)
+
+        painter.end()
+
+        icon.addPixmap(pixmap)
+        return icon
+
+    # ------------------------------------------------------------
+
     def contextMenuEvent(self, event):
-        """
-        Display a context menu for creating nodes or saving the code.
-        """
         menu = QMenu(self)
         menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint)
         menu.setAttribute(Qt.WA_TranslucentBackground)
 
-        style = self._get_context_menu_style_sheet()
+        # Get context menu style.
+        style = self.theme_manager.get_menu_style(is_context_menu=True)
         menu.setStyleSheet(style)
 
         # Classical node options.
@@ -399,10 +531,8 @@ class Canvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent):
         """
-        Handle mouse press events.
-
-        Left-click selects nodes or edges and begins dragging or panning.
-        Ctrl+left-click creates an edge between nodes.
+        Left-click: Selects nodes or edges and begins dragging or panning.
+        Ctrl+left-click: Creates an edge between nodes.
         """
         pos = event.position()  # QPointF
         if event.button() == Qt.LeftButton:
@@ -451,8 +581,8 @@ class Canvas(QWidget):
                         self.selecting = True
                         self.drag_start = None
                         self._drag_start_positions = {}
-                        world_pos = ((pos.x() - self.view_offset.x()) / self.zoom,
-                                     (pos.y() - self.view_offset.y()) / self.zoom)
+                        world_pos = ((pos.x() - self._view_offset.x()) / self._zoom,
+                                     (pos.y() - self._view_offset.y()) / self._zoom)
                         self.selection_rect_start = world_pos
                         self.selection_mode = "edge" if event.modifiers() & Qt.ControlModifier else "node"
                     else:
@@ -464,14 +594,9 @@ class Canvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        """
-        Handle mouse move events.
-
-        Updates node positions when dragging or adjusts view_offset when panning.
-        """
         if self.drag_start is not None:
             delta = event.position() - self.drag_start
-            delta_world = (delta.x() / self.zoom, delta.y() / self.zoom)
+            delta_world = (delta.x() / self._zoom, delta.y() / self._zoom)
             for node in self._get_selected_nodes():
                 init_pos = self._drag_start_positions[node['id']]
                 node['pos'] = (init_pos[0] + delta_world[0], init_pos[1] + delta_world[1])
@@ -479,8 +604,8 @@ class Canvas(QWidget):
 
         pos = event.position()
         if self.selecting:
-            current = ((pos.x() - self.view_offset.x()) / self.zoom,
-                       (pos.y() - self.view_offset.y()) / self.zoom)
+            current = ((pos.x() - self._view_offset.x()) / self._zoom,
+                       (pos.y() - self._view_offset.y()) / self._zoom)
             x1, y1 = self.selection_rect_start
             x2, y2 = current
             self.selection_rect = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
@@ -488,13 +613,13 @@ class Canvas(QWidget):
 
         if self.dragged_node is not None:
             new_center = pos - self.drag_offset
-            world_x = (new_center.x() - self.view_offset.x()) / self.zoom
-            world_y = (new_center.y() - self.view_offset.y()) / self.zoom
+            world_x = (new_center.x() - self._view_offset.x()) / self._zoom
+            world_y = (new_center.y() - self._view_offset.y()) / self._zoom
             self.dragged_node['pos'] = (world_x, world_y)
             self.update()
         elif self.pan_active and self.last_pan_point is not None:
             delta = pos - self.last_pan_point
-            self.view_offset += delta
+            self._view_offset += delta
             self.last_pan_point = pos
             self.update()
 
@@ -507,9 +632,6 @@ class Canvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        """
-        Handle mouse release events, ending panning or dragging.
-        """
         if self.pan_active:
             self.pan_active = False
             self.last_pan_point = None
@@ -561,73 +683,304 @@ class Canvas(QWidget):
         super().resizeEvent(event)
         self._position_hamburger()
 
-    def open_hamburger_menu(self):
-        # Change hamburger icon to a larger cross while the menu is open.
-        self.hamburger.setText("×")
-        self.hamburger.setStyleSheet(f"""
-            QToolButton {{
-                background: none;
-                border: none;
-                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 28px;
-                color: {"black" if not self.invert_colors else "white"};
-            }}
-        """)
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
 
-        # Store the menu in self._hamburger_menu so it can be updated later.
-        self._hamburger_menu = QMenu(self)
-        self._hamburger_menu.setWindowFlags(self._hamburger_menu.windowFlags() | Qt.FramelessWindowHint)
-        self._hamburger_menu.setAttribute(Qt.WA_TranslucentBackground)
-        self._hamburger_menu.setStyleSheet(self._get_hamburger_menu_style_sheet())
+        # Fill background.
+        painter.fillRect(self.rect(), self.theme_manager.background)
 
-        # Add toggle switches.
-        toggle_show_crossings = self._create_toggle_widget("Show Crossings", self.show_crossings,
-                                                           self._set_show_crossings)
-        self._hamburger_menu.addAction(toggle_show_crossings)
+        # ----- Draw grid (triangular lattice) in widget coordinates -----
+        spacing = 20
+        dot_radius = 1
+        painter.setPen(QPen(self.theme_manager.grid, 0.5))
 
-        toggle_dark_mode = self._create_toggle_widget("Dark Mode", self.invert_colors, self._set_dark_mode)
-        self._hamburger_menu.addAction(toggle_dark_mode)
+        # Compute grid indices from view_offset and widget dimensions.
+        vox = self._view_offset.x()
+        voy = self._view_offset.y()
+        width = self.width()
+        height = self.height()
+        min_n = math.floor((-vox) / spacing)
+        max_n = math.ceil((width - vox) / spacing)
+        min_m = math.floor((-voy) / spacing)
+        max_m = math.ceil((height - voy) / spacing)
 
-        # Add a separator.
-        self._hamburger_menu.addSeparator()
+        for m in range(min_m, max_m + 1):
+            y = m * spacing + voy
+            row_offset = spacing / 2 if (m % 2 != 0) else 0
+            for n in range(min_n, max_n + 1):
+                x = n * spacing + vox + row_offset
+                painter.drawEllipse(QPointF(x, y), dot_radius, dot_radius)
 
-        # Add Clear Canvas as a plain action.
-        self._hamburger_menu.addAction("Clear Canvas", self._clear_canvas)
+        # Draw selection area.
+        if self.selecting and self.selection_rect is not None:
+            painter.setPen(Qt.NoPen)
+            # Create a semi-transparent selection color.
+            selection_color = QColor(self.theme_manager.selected)
+            selection_color.setAlpha(50)
+            painter.setBrush(selection_color)
 
-        # Add another separator.
-        self._hamburger_menu.addSeparator()
+            # Convert world coordinates back to widget coordinates.
+            rect = QRectF(
+                self.selection_rect[0] * self._zoom + self._view_offset.x(),
+                self.selection_rect[1] * self._zoom + self._view_offset.y(),
+                (self.selection_rect[2] - self.selection_rect[0]) * self._zoom,
+                (self.selection_rect[3] - self.selection_rect[1]) * self._zoom
+            )
+            painter.drawRoundedRect(rect, 8, 8)
+            # Reset the brush to avoid affecting other drawing.
+            painter.setBrush(Qt.NoBrush)
 
-        # Add a non-clickable Crossing Number widget.
-        crossing_widget = QWidget()
-        crossing_layout = QHBoxLayout(crossing_widget)
-        crossing_layout.setContentsMargins(8, 4, 8, 4)
-        text_color = "#ffffff" if self.invert_colors else "#333333"
-        crossing_label = QLabel(f"Crossings: {self._get_crossing_number()}")
-        crossing_label.setStyleSheet(
-            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {text_color};"
-        )
-        crossing_layout.addWidget(crossing_label)
-        crossing_layout.addStretch()
-        crossing_action = QWidgetAction(self)
-        crossing_action.setDefaultWidget(crossing_widget)
-        self._hamburger_menu.addAction(crossing_action)
+        # ----- Draw world objects (nodes and edges) -----
+        painter.save()
+        painter.translate(self._view_offset)
+        painter.scale(self._zoom, self._zoom)
 
-        # Position the menu further left (200 pixels offset).
-        pos = self.hamburger.mapToGlobal(QPointF(self.hamburger.rect().bottomRight()) - QPointF(315, -10)).toPoint()
-        self._hamburger_menu.exec(pos)
-        self._hamburger_menu = None  # Clear the reference once closed.
+        # Draw edges.
+        self._draw_edges(painter)
 
-        # Revert hamburger icon and style after the menu is closed.
-        self.hamburger.setText("☰")
-        self.hamburger.setStyleSheet(f"""
-            QToolButton {{
-                background: none;
-                border: none;
-                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 18px;
-                color: {"black" if not self.invert_colors else "white"};
-            }}
-        """)
+        # Draw crossings.
+        if self.show_crossings:
+            self._draw_crossings(painter)
+
+        # Draw nodes.
+        self._draw_nodes(painter)
+
+        painter.restore()
+
+    def _draw_edges(self, painter):
+        # Draw a subtle shadow for all edges first.
+        shadow_color = QColor(0, 0, 0, 30)
+        shadow_offset = 0.5
+        for edge in self.edges:
+            source = self.get_node_by_id(edge['source'])
+            target = self.get_node_by_id(edge['target'])
+            if source is None or target is None:
+                continue
+
+            src_center = QPointF(source['pos'][0], source['pos'][1])
+            tgt_center = QPointF(target['pos'][0], target['pos'][1])
+
+            # Draw shadow first.
+            pen = QPen(shadow_color, 1.2)
+            painter.setPen(pen)
+            src_shadow = QPointF(src_center.x() + shadow_offset, src_center.y() + shadow_offset)
+            tgt_shadow = QPointF(tgt_center.x() + shadow_offset, tgt_center.y() + shadow_offset)
+            painter.drawLine(src_shadow, tgt_shadow)
+
+        # Draw the actual edges.
+        for edge in self.edges:
+            if edge.get('selected', False):
+                pen = QPen(self.theme_manager.selected, 1.2)
+            else:
+                # Get color based on node types.
+                source = self.get_node_by_id(edge['source'])
+                target = self.get_node_by_id(edge['target'])
+                if source is None or target is None:
+                    continue
+
+                if source["type"] in {"bit", "parity_check"} or target["type"] in {"bit", "parity_check"}:
+                    pen = QPen(self.theme_manager.foreground, 0.8)
+                else:
+                    # For quantum edges, use a gradient of the node colors.
+                    source_color = self.theme_manager.get_node_color(source["type"])
+                    target_color = self.theme_manager.get_node_color(target["type"])
+
+                    # Create a linear gradient for the edge.
+                    gradient = QLinearGradient(
+                        source['pos'][0], source['pos'][1],
+                        target['pos'][0], target['pos'][1]
+                    )
+                    gradient.setColorAt(0, source_color)
+                    gradient.setColorAt(1, target_color)
+
+                    pen = QPen(QBrush(gradient), 1.2)
+
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+
+            src_center = QPointF(source['pos'][0], source['pos'][1])
+            tgt_center = QPointF(target['pos'][0], target['pos'][1])
+
+            # Check if the nodes are quantum: no clipping prevention is necessary.
+            if source["type"] not in {"bit", "parity_check"}:
+                painter.drawLine(src_center, tgt_center)
+                continue
+
+            dx = tgt_center.x() - src_center.x()
+            dy = tgt_center.y() - src_center.y()
+            dist = math.hypot(dx, dy)
+            if dist == 0:
+                continue
+
+            # Compute margins so edges begin at node boundaries.
+            margin_source = self._get_margin(source, dx, dy)
+            margin_target = self._get_margin(target, -dx, -dy)
+            if margin_source + margin_target > dist:
+                continue
+
+            new_src = QPointF(src_center.x() + dx / dist * margin_source,
+                              src_center.y() + dy / dist * margin_source)
+            new_tgt = QPointF(tgt_center.x() - dx / dist * margin_target,
+                              tgt_center.y() - dy / dist * margin_target)
+            painter.drawLine(new_src, new_tgt)
+
+    def _draw_crossings(self, painter):
+        # Filter quantum nodes and edges.
+        quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+        qnodes = {node['id']: node for node in self.nodes if node['type'] in quantum_types}
+        qedges = [edge for edge in self.edges
+                  if self.get_node_by_id(edge['source']) and self.get_node_by_id(edge['target'])
+                  and self.get_node_by_id(edge['source'])['type'] in quantum_types
+                  and self.get_node_by_id(edge['target'])['type'] in quantum_types]
+
+        if not qnodes or not qedges:
+            return
+
+        # Build a mapping from quantum node id to a continuous index and a list of positions.
+        qnode_ids = list(qnodes.keys())
+        id_to_index = {node_id: i for i, node_id in enumerate(qnode_ids)}
+        pos_list = [qnodes[node_id]['pos'] for node_id in qnode_ids]
+
+        # Build edge list as tuples of indices.
+        edge_list = []
+        for edge in qedges:
+            try:
+                i = id_to_index[edge['source']]
+                j = id_to_index[edge['target']]
+                edge_list.append((i, j))
+            except KeyError:
+                continue
+
+        # For each crossing, compute approximate intersection and draw a diamond.
+        crossings = find_edge_crossings(pos_list, edge_list)
+        for crossing in crossings:
+            # Each crossing is a frozenset of two edges, extract them.
+            edge_pair = list(crossing)
+            e1, e2 = edge_pair[0], edge_pair[1]
+
+            # Get the endpoints (in world coordinates) for each edge.
+            def get_endpoints(e):
+                try:
+                    n1 = qnodes[qnode_ids[e[0]]]['pos']
+                    n2 = qnodes[qnode_ids[e[1]]]['pos']
+                    return n1, n2
+                except (KeyError, IndexError):
+                    return None, None
+
+            a, b = get_endpoints(e1)
+            c, d = get_endpoints(e2)
+
+            if None in (a, b, c, d):
+                continue
+
+            ip = line_intersection(a, b, c, d)
+            if ip is not None:
+                size = 4  # size of the square in world units
+
+                # Draw a shadow first.
+                painter.save()
+                painter.translate(ip[0] + 0.5, ip[1] + 0.5)
+                painter.rotate(45)
+                painter.setBrush(QColor(0, 0, 0, 80))
+                painter.setPen(Qt.NoPen)
+                painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
+                painter.restore()
+
+                # Draw the diamond.
+                painter.save()
+                painter.translate(ip[0], ip[1])
+                painter.rotate(45)
+
+                # Use a light color that contrasts with the background.
+                if self.theme_manager.dark_mode:
+                    diamond_color = QColor(255, 255, 255, 180)
+                else:
+                    diamond_color = QColor(0, 0, 0, 180)
+
+                painter.setBrush(diamond_color)
+                painter.setPen(Qt.NoPen)
+                painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
+                painter.restore()
+
+    def _draw_nodes(self, painter):
+        for node in self.nodes:
+            x = node['pos'][0]
+            y = node['pos'][1]
+            r = self.node_radius
+            l = 1.86 * r
+            node_type = node['type']
+
+            # Determine if node is selected.
+            is_selected = node.get('selected', False)
+
+            # Draw shadow first.
+            shadow_color = QColor(0, 0, 0, 50)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(shadow_color)
+            shadow_offset = 1  # shadow offset in world units
+
+            if node_type == "bit":
+                painter.drawEllipse(QPointF(x + shadow_offset, y + shadow_offset), r, r)
+            else:
+                # Square/rectangle nodes.
+                painter.drawRect(QRectF(x - l / 2 + shadow_offset, y - l / 2 + shadow_offset, l, l))
+
+            # Set node color and pen.
+            node_color = self.theme_manager.get_node_color(node_type)
+
+            # Draw selection highlight if selected.
+            if is_selected:
+                # Draw a bigger highlight circle/square behind the node.
+                highlight_size = 2  # pixels wider than the node
+                highlight_color = self.theme_manager.selected
+                highlight_color.setAlpha(100)  # semi-transparent
+
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(highlight_color)
+
+                if node_type == "bit" or node_type == "qubit":
+                    painter.drawEllipse(QPointF(x, y), r + highlight_size, r + highlight_size)
+                else:
+                    # Square nodes.
+                    painter.drawRect(QRectF(x - l / 2 - highlight_size, y - l / 2 - highlight_size,
+                                            l + 2 * highlight_size, l + 2 * highlight_size))
+
+                # Also use a selection outline.
+                pen = QPen(self.theme_manager.selected, 1.5)
+            else:
+                pen = QPen(self.theme_manager.foreground, 0.8)
+
+            # Draw the actual node.
+            if node_type in {"bit", "parity_check"}:
+                # Classical nodes have outlines.
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+
+                if node_type == "bit":
+                    painter.drawEllipse(QPointF(x, y), r, r)
+                else:
+                    painter.drawRect(QRectF(x - l / 2, y - l / 2, l, l))
+            else:
+                # Quantum nodes have fills.
+                if is_selected:
+                    painter.setPen(pen)
+                else:
+                    painter.setPen(Qt.NoPen)
+
+                # Use gradients for quantum nodes.
+                gradient = QRadialGradient(x, y, r * 1.2)
+                gradient.setColorAt(0, node_color.lighter(120))
+                gradient.setColorAt(1, node_color)
+                painter.setBrush(gradient)
+
+                if node_type == "qubit":
+                    painter.drawEllipse(QPointF(x, y), r, r)
+                else:  # Z or X stabilizer
+                    painter.drawRoundedRect(QRectF(x - l / 2, y - l / 2, l, l), 2, 2)
+
+            # Reset brush for next node.
+            painter.setBrush(Qt.NoBrush)
 
     def save_to_file(self, filename):
         """
@@ -670,8 +1023,8 @@ class Canvas(QWidget):
         node_type : str
             The type of node to create ('bit' or 'parity_check').
         """
-        adjusted_x = (pos.x() - self.view_offset.x()) / self.zoom
-        adjusted_y = (pos.y() - self.view_offset.y()) / self.zoom
+        adjusted_x = (pos.x() - self._view_offset.x()) / self._zoom
+        adjusted_y = (pos.y() - self._view_offset.y()) / self._zoom
         new_node = {
             'id': len(self.nodes),
             'pos': (adjusted_x, adjusted_y),
@@ -737,10 +1090,18 @@ class Canvas(QWidget):
         """
         Return the node at the given widget position, if any.
 
-        The position is converted to world coordinates.
+        Parameters
+        ----------
+        pos : QPointF
+            The position in widget coordinates.
+
+        Returns
+        -------
+        dict or None
+            The node at the position, or None if not found.
         """
-        adjusted_x = (pos.x() - self.view_offset.x()) / self.zoom
-        adjusted_y = (pos.y() - self.view_offset.y()) / self.zoom
+        adjusted_x = (pos.x() - self._view_offset.x()) / self._zoom
+        adjusted_y = (pos.y() - self._view_offset.y()) / self._zoom
         for node in self.nodes:
             nx, ny = node['pos']
             dx = adjusted_x - nx
@@ -750,41 +1111,30 @@ class Canvas(QWidget):
         return None
 
     def _deselect_all_nodes(self):
-        """Deselect all nodes."""
         for node in self.nodes:
             node['selected'] = False
 
     def _deselect_all_edges(self):
-        """Deselect all edges."""
         for edge in self.edges:
             edge['selected'] = False
 
     def _deselect_all(self):
-        """Deselect all nodes and edges."""
         self._deselect_all_nodes()
         self._deselect_all_edges()
 
     def _get_selected_nodes(self):
-        """Return a list of all currently selected nodes."""
         return [node for node in self.nodes if node.get('selected', False)]
 
     def _get_selected_edges(self):
-        """Return a list of all currently selected edges."""
         return [edge for edge in self.edges if edge.get('selected', False)]
 
     def _get_selected_node(self):
-        """
-        Return the selected node, if any.
-        """
         for node in self.nodes:
             if node.get('selected', False):
                 return node
         return None
 
     def _get_selected_edge(self):
-        """
-        Return the selected edge, if any.
-        """
         for edge in self.edges:
             if edge.get('selected', False):
                 return edge
@@ -793,6 +1143,18 @@ class Canvas(QWidget):
     def _edge_exists(self, source_id, target_id):
         """
         Check if an edge already exists between two nodes (undirected).
+
+        Parameters
+        ----------
+        source_id : int
+            The source node ID.
+        target_id : int
+            The target node ID.
+
+        Returns
+        -------
+        bool
+            True if the edge exists, False otherwise.
         """
         for edge in self.edges:
             if ((edge['source'] == source_id and edge['target'] == target_id) or
@@ -804,11 +1166,19 @@ class Canvas(QWidget):
         """
         Return the edge at the given widget position, if any.
 
-        The position is converted to world coordinates.
+        Parameters
+        ----------
+        pos : QPointF
+            The position in widget coordinates.
+
+        Returns
+        -------
+        dict or None
+            The edge at the position, or None if not found.
         """
-        world_pos = QPointF((pos.x() - self.view_offset.x()) / self.zoom,
-                            (pos.y() - self.view_offset.y()) / self.zoom)
-        threshold = 5 / self.zoom
+        world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
+                            (pos.y() - self._view_offset.y()) / self._zoom)
+        threshold = 5 / self._zoom
         for edge in self.edges:
             source = self.get_node_by_id(edge['source'])
             target = self.get_node_by_id(edge['target'])
@@ -820,160 +1190,11 @@ class Canvas(QWidget):
                 return edge
         return None
 
-    def _get_color(self, color_name: str) -> QColor:
-        """
-        Returns the given color, or its inverted version if invert_colors is True.
-        """
-        color = QColor(color_name)
-        if self.invert_colors:
-            # Invert by subtracting each channel from 255.
-            r = min(255 - color.red() + 50, 255)
-            g = min(255 - color.green() + 50, 255)
-            b = min(255 - color.blue() + 50, 255)
-            return QColor(r, g, b, color.alpha())
-        # TODO: Improve this color inversion, call it dark mode instead.
-        return color
-
-    def _get_context_menu_style_sheet(self) -> str:
-        if self.invert_colors:
-            bg_color = "rgb(0, 0, 0)"
-            text_color = "#ffffff"
-            selected_color = "rgba(50, 50, 50, 230)"
-        else:
-            bg_color = "rgb(245, 245, 245)"
-            text_color = "#333333"
-            selected_color = "rgba(230, 230, 230, 230)"
-        return f"""
-            QMenu {{
-                background-color: {bg_color};
-                border: none;
-                border-radius: 5px;
-                padding: 5px;
-                margin: 0;
-                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 12px;
-                color: {text_color};
-                min-width: 150px;
-            }}
-            QMenu::item {{
-                padding: 8px 20px;
-                background-color: transparent;
-                border: none;
-                border-radius: 5px;
-                color: {text_color};
-            }}
-            QMenu::item:selected {{
-                background-color: {selected_color};
-                color: {text_color};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: #dcdcdc;
-                margin: 5px 0;
-            }}
-        """
-
-    def _get_hamburger_menu_style_sheet(self) -> str:
-        if self.invert_colors:
-            bg_color = "rgba(0, 0, 0, 230)"
-            text_color = "#ffffff"
-            selected_color = "rgba(50, 50, 50, 230)"
-        else:
-            bg_color = "rgba(245, 245, 245, 230)"
-            text_color = "#333333"
-            selected_color = "rgba(230, 230, 230, 230)"
-        return f"""
-            QMenu {{
-                background-color: {bg_color};
-                border: none;
-                border-radius: 5px;
-                padding: 5px;
-                margin: 0;
-                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 12px;
-                color: {text_color};
-                min-width: 300px;
-            }}
-            QMenu::item {{
-                padding: 8px 20px;
-                background-color: transparent;
-                border: none;
-                border-radius: 5px;
-                color: {text_color};
-            }}
-            QMenu::item:selected {{
-                background-color: {selected_color};
-                color: {text_color};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: #dcdcdc;
-                margin: 5px 0;
-            }}
-        """
-
-    def _toggle_crossings(self):
-        self.show_crossings = not self.show_crossings
-
-    def _create_hamburger(self):
-        self.hamburger = QToolButton(self)
-        # Use the Unicode hamburger icon
-        self.hamburger.setText("☰")
-        self.hamburger.setCursor(Qt.PointingHandCursor)
-        # Remove borders and background; let the style sheet handle appearance.
-        self.hamburger.setStyleSheet("""
-            QToolButton {
-                background: none;
-                border: none;
-                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 18px;
-                color: %s;
-            }
-        """ % ("black" if not self.invert_colors else "white"))
-        self.hamburger.setFixedSize(30, 30)
-        self.hamburger.clicked.connect(self.open_hamburger_menu)
-        # Position it initially.
-        self._position_hamburger()
-
     def _position_hamburger(self):
-        # Place the hamburger in the top right corner with a margin.
         margin = 10
         self.hamburger.move(self.width() - self.hamburger.width() - margin, margin)
 
-    def _set_show_crossings(self, checked: bool):
-        self.show_crossings = checked
-        self.update()
-
-    def _set_dark_mode(self, checked: bool):
-        self.invert_colors = checked
-        self.update()
-        # Update hamburger button style.
-        self.hamburger.setStyleSheet(f"""
-            QToolButton {{
-                background: none;
-                border: none;
-                font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-                font-size: 18px;
-                color: {"black" if not self.invert_colors else "white"};
-            }}
-        """)
-        # If the hamburger menu is open, update its style and its child widgets.
-        if hasattr(self, "_hamburger_menu") and self._hamburger_menu is not None:
-            new_style = self._get_hamburger_menu_style_sheet()
-            self._hamburger_menu.setStyleSheet(new_style)
-            # Iterate through each action in the menu.
-            for action in self._hamburger_menu.actions():
-                if isinstance(action, QWidgetAction):
-                    widget = action.defaultWidget()
-                    if widget is not None:
-                        for label in widget.findChildren(QLabel):
-                            text_color = "#ffffff" if self.invert_colors else "#333333"
-                            label.setStyleSheet(
-                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; padding-left: 10px; color: {text_color};"
-                            )
-
     def _get_crossing_number(self) -> int:
-        """Compute and return the number of quantum edge crossings."""
         quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
         qnodes = {node['id']: node for node in self.nodes if node['type'] in quantum_types}
         qedges = [edge for edge in self.edges
@@ -995,35 +1216,128 @@ class Canvas(QWidget):
             return len(crossings)
         return 0
 
-    def _create_toggle_widget(self, label_text: str, initial: bool, callback):
-        from PySide6.QtWidgets import QWidgetAction, QWidget, QHBoxLayout, QLabel
-        widget = QWidget()
-        widget.setMinimumWidth(220)  # You might reduce this if you want smaller toggles.
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(5, 2, 5, 2)
-
-        # Use the new (smaller) ToggleSwitch widget if you haven't already adjusted its size.
-        toggle = ToggleSwitch(initial, widget)
-        toggle.setFixedSize(40, 20)  # Ensure the toggle is smaller.
-        toggle.toggled.connect(callback)
-
-        text_color = "#ffffff" if self.invert_colors else "#333333"
-        label = QLabel(label_text)
-        label.setStyleSheet(
-            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; padding-left: 10px; color: {text_color};"
-        )
-
-        # Add the toggle before the label.
-        layout.addWidget(toggle)
-        layout.addWidget(label)
-        layout.addStretch()
-
-        action = QWidgetAction(self)
-        action.setDefaultWidget(widget)
-        return action
-
     def _clear_canvas(self):
-        """Clear all nodes and edges from the canvas."""
         self.nodes = []
         self.edges = []
         self.update()
+
+    def _on_menu_hide(self):
+        if hasattr(self, 'hamburger'):
+            self.hamburger.setOpen(False)
+        self._hamburger_menu = None
+
+    def _create_custom_toggle(self, label_text, initial, callback):
+        """
+        Create a toggle widget that doesn't auto-close the menu.
+
+        Parameters
+        ----------
+        label_text : str
+            Text label for the toggle.
+        initial : bool
+            Initial state of the toggle.
+        callback : function
+            Function to call when toggle state changes.
+
+        Returns
+        -------
+        QWidget
+            The widget containing the toggle.
+        """
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(8, 4, 8, 4)
+
+        # Create label.
+        label = QLabel(label_text)
+        label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
+        )
+
+        # Create toggle with pre-set state.
+        toggle = ToggleSwitch(initial, widget)
+
+        # Connect the toggle after setting up the preventMenuClose attribute.
+        toggle.toggled.connect(lambda checked: self._handle_toggle(callback, checked))
+
+        # Add label and toggle in correct order.
+        layout.addWidget(label)
+        layout.addStretch()
+        layout.addWidget(toggle)
+
+        return widget
+
+    def _handle_toggle(self, callback, checked):
+        """
+        Handle toggle changes without closing the menu.
+
+        Parameters
+        ----------
+        callback : function
+            The callback to call.
+        checked : bool
+            The new toggle state.
+        """
+        callback(checked)
+        # Keep the hamburger menu open.
+        if self._hamburger_menu:
+            # Refocus on menu to prevent auto-close.
+            self._hamburger_menu.setFocus()
+
+    def _on_crossings_toggled(self, checked):
+        self.show_crossings = checked
+        self.update()
+
+    def _on_dark_mode_toggled(self, checked):
+        # Update theme immediately.
+        self.theme_manager.set_dark_mode(checked)
+
+        # Force canvas to update with new colors.
+        self.update()
+
+        # Update the existing menu in-place if it's open.
+        if self._hamburger_menu:
+            # Store the current position.
+            menu_pos = self._hamburger_menu.pos()
+
+            # Update menu styles without closing it.
+            self._hamburger_menu.setStyleSheet(self.theme_manager.get_menu_style())
+
+            # Update all toggle widgets in the menu.
+            for action in self._hamburger_menu.actions():
+                if isinstance(action, QWidgetAction):
+                    widget = action.defaultWidget()
+                    if widget:
+                        # Update all labels in the widget.
+                        for child in widget.findChildren(QLabel):
+                            child.setStyleSheet(
+                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; "
+                                f"font-size: 12px; color: {self.theme_manager.foreground.name()};"
+                            )
+
+            # Update the crossing number display if present.
+            self._update_crossing_display()
+
+            # Update the hamburger icon.
+            if hasattr(self, 'hamburger'):
+                self.hamburger.update()
+
+    def _update_crossing_display(self):
+        if not self._hamburger_menu:
+            return
+
+        # Look for the crossing number display
+        for action in self._hamburger_menu.actions():
+            if isinstance(action, QWidgetAction):
+                widget = action.defaultWidget()
+                if widget:
+                    # Look for a label with "Crossings:" text
+                    for child in widget.findChildren(QLabel):
+                        if "Crossings:" in child.text():
+                            # Update the label with current theme
+                            child.setStyleSheet(
+                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; "
+                                f"font-size: 12px; color: {self.theme_manager.foreground.name()};"
+                            )
+                            # Also update the count in case it changed
+                            child.setText(f"Crossings: {self._get_crossing_number()}")
