@@ -14,7 +14,7 @@ class ThemeManager:
             # Dark theme colors.
             self.background = QColor("#212121")
             self.foreground = QColor("#FFFFFF")
-            self.grid = QColor("#404040")
+            self.grid = QColor("#5C5C5C")
             self.selected = QColor("#3D7EFF")  # bright blue
             self.node_qubit = QColor("#7B68EE")  # medium slate blue
             self.node_z_stabilizer = QColor("#2196F3")  # blue
@@ -25,16 +25,16 @@ class ThemeManager:
             self.menu_selected = QColor(66, 66, 66, 230)
             self.menu_separator = QColor(100, 100, 100)
         else:
-            # Light theme colors
+            # Light theme colors.
             self.background = QColor("#FFFFFF")
             self.foreground = QColor("#000000")
-            self.grid = QColor("#E0E0E0")
+            self.grid = QColor("#A3A3A3")
             self.selected = QColor("#1976D2")  # darker blue
-            self.node_qubit = QColor("#9575CD")  # light purple
-            self.node_z_stabilizer = QColor("#64B5F6")  # light blue
-            self.node_x_stabilizer = QColor("#FF8A80")  # light red
-            self.node_bit = QColor("#81C784")  # light green
-            self.node_parity = QColor("#FFB74D")  # light orange
+            self.node_qubit = QColor("#D3D3D3")  # light purple
+            self.node_z_stabilizer = QColor("#ADD8E6")  # light blue
+            self.node_x_stabilizer = QColor("#FFC0CB")  # light red
+            self.node_bit = QColor("#000000")  # light green
+            self.node_parity = QColor("#000000")  # light orange
             self.menu_bg = QColor(245, 245, 245, 230)
             self.menu_selected = QColor(230, 230, 230, 230)
             self.menu_separator = QColor(220, 220, 220)
