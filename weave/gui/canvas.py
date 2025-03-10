@@ -717,7 +717,6 @@ class Canvas(QWidget):
             painter.setPen(Qt.NoPen)
             # Create a semi-transparent selection color.
             selection_color = QColor(self.theme_manager.selected)
-            selection_color.setAlpha(50)
             painter.setBrush(selection_color)
 
             # Convert world coordinates back to widget coordinates.
@@ -728,6 +727,7 @@ class Canvas(QWidget):
                 (self.selection_rect[3] - self.selection_rect[1]) * self._zoom
             )
             painter.drawRoundedRect(rect, 5, 5)
+
             # Reset the brush to avoid affecting other drawing.
             painter.setBrush(Qt.NoBrush)
 
@@ -779,23 +779,19 @@ class Canvas(QWidget):
             else:
                 src, tgt = src_center, tgt_center
 
+            pen = QPen(self.theme_manager.foreground, 0.8)
+            pen.setCapStyle(Qt.FlatCap)
+            painter.setPen(pen)
+            painter.drawLine(src, tgt)
+
             if edge.get('selected', False):
                 highlight_size = 5
                 highlight_color = self.theme_manager.selected
-                highlight_color.setAlpha(40)
 
                 pen = QPen(highlight_color, highlight_size)
                 pen.setCapStyle(Qt.FlatCap)
                 painter.setPen(pen)
                 painter.drawLine(src, tgt)
-
-            color = self.theme_manager.selected if edge.get('selected', False) else self.theme_manager.foreground
-            color.setAlpha(255)
-            pen = QPen(color, 0.8)
-            pen.setCapStyle(Qt.FlatCap)
-            painter.setPen(pen)
-
-            painter.drawLine(src, tgt)
 
     def _draw_crossings(self, painter):
         # Filter quantum nodes and edges.
@@ -886,7 +882,6 @@ class Canvas(QWidget):
                 # Draw a bigger highlight circle/square behind the node.
                 highlight_size = 2
                 highlight_color = self.theme_manager.selected
-                highlight_color.setAlpha(40)
 
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(highlight_color)

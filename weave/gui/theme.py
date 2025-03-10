@@ -13,7 +13,7 @@ class ThemeManager:
         if self.dark_mode:
             # Dark theme colors.
             self.background = QColor("#212121")
-            self.foreground = QColor("#FFFFFF")
+            self.foreground = QColor("#E0E0E0")
             self.grid = QColor("#5C5C5C")
             self.selected = QColor("#3D7EFF")
             self.node_qubit = QColor("#464646")
@@ -38,6 +38,8 @@ class ThemeManager:
             self.menu_bg = QColor(245, 245, 245, 230)
             self.menu_selected = QColor(230, 230, 230, 230)
             self.menu_separator = QColor(220, 220, 220)
+
+        self.selected.setAlpha(60)
 
     def set_dark_mode(self, dark_mode):
         if self.dark_mode != dark_mode:
