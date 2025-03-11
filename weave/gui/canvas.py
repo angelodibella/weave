@@ -4,7 +4,7 @@ from typing import Any
 
 from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent, QRadialGradient, QIcon, QPixmap, \
-    QLinearGradient, QBrush
+    QLinearGradient, QBrush, QAction
 from PySide6.QtCore import Qt, QPointF, QRectF, QPropertyAnimation, QEasingCurve, Property
 
 from .theme import ThemeManager
@@ -99,6 +99,9 @@ class Canvas(QWidget):
         self.last_pan_point = None  # QPointF
         self.dragged_node = None
         self.drag_offset = QPointF(0, 0)
+
+        # Initialize graph detection.
+        self.graphs = []  # each entry: {'node_ids': set(), 'type': 'quantum' or 'classical', 'selected': bool}
 
         # Selection state.
         self.selecting = False  # whether a rectangular selection is active
@@ -248,7 +251,7 @@ class Canvas(QWidget):
         Ctrl+-: Zoom out.
         Ctrl+A: Select all nodes.
         Escape: Deselect all objects.
-        Delete/Backspace: Remove selected nodes/edges.
+        Delete/Backspace: Remove selected objects.
         """
         if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
             # Select all nodes.
@@ -280,12 +283,21 @@ class Canvas(QWidget):
                 self.edges = [e for e in self.edges if
                               e['source'] not in ids_to_remove and e['target'] not in ids_to_remove]
                 self._deselect_all()
+                self._update_graphs()
             else:
                 selected_edges = self._get_selected_edges()
                 if selected_edges:
                     for edge in selected_edges:
                         self.edges.remove(edge)
                     self._deselect_all()
+                    self._update_graphs()
+                else:
+                    # Check for selected graphs.
+                    selected_graphs = [g for g in self.graphs if g.get('selected', False)]
+                    if selected_graphs:
+                        for graph in selected_graphs:
+                            self.graphs.remove(graph)
+                        self.update()
             self.update()
 
         self.update()
@@ -524,10 +536,41 @@ class Canvas(QWidget):
         quantum_menu.addAction("New Z-Stabilizer", lambda: self.add_node_at(event.pos(), "Z_stabilizer"))
         quantum_menu.addAction("New X-Stabilizer", lambda: self.add_node_at(event.pos(), "X_stabilizer"))
 
-        # Save option.
-        menu.addAction("Save Code as CSV", lambda: print("Save functionality not implemented yet."))
+        # Check if we're clicking on a node
+        pos = event.pos()
+        node = self._get_node_at(pos)
+
+        if node:
+            if not node['selected'] and len(self._get_selected_nodes()) >= 1:
+                self._deselect_all()
+            node['selected'] = True
+            self.update()
+
+            menu.addSeparator()
+
+            detect_action = QAction("Detect", menu)
+            detect_action.triggered.connect(lambda: self._detect_graph(node['id']))
+            menu.addAction(detect_action)
+
+            # Check if node's graph would have more than 2 nodes
+            nodes, _ = self._detect_connected_component(node['id'])
+            detect_action.setEnabled(len(nodes) > 2)
+
+            # Check if node is already in a detected graph
+            for graph in self.graphs:
+                if node['id'] in graph['node_ids']:
+                    detect_action.setEnabled(False)
+                    break
+
+            menu.addAction("Save Code as CSV", lambda: print("Save functionality not implemented yet."))
+
         menu.exec(event.globalPos())
         self.update()
+
+        if node:
+            if len(self._get_selected_nodes()) == 1:
+                node["selected"] = False
+            self.update()
 
     def mousePressEvent(self, event: QMouseEvent):
         """
@@ -549,7 +592,9 @@ class Canvas(QWidget):
                                         'target': clicked_node['id'],
                                         'selected': False
                                     })
-                        self._deselect_all()  # optionally, clear selection after edge creation
+                                    # Immediately update graphs when edge is created.
+                                    self._update_graphs()
+                        self._deselect_all()
                     else:
                         clicked_node['selected'] = True
                     self.update()
@@ -577,7 +622,16 @@ class Canvas(QWidget):
                         self._deselect_all()
                         clicked_edge['selected'] = True
                 else:
-                    if event.modifiers() & Qt.ShiftModifier:
+                    # Check if clicked on a graph border
+                    clicked_graph = self._get_graph_at(pos)
+                    if clicked_graph:
+                        if event.modifiers() & Qt.ShiftModifier:
+                            clicked_graph['selected'] = True
+                        else:
+                            self._deselect_all()
+                            clicked_graph['selected'] = True
+                        self.update()
+                    elif event.modifiers() & Qt.ShiftModifier:
                         self.selecting = True
                         self.drag_start = None
                         self._drag_start_positions = {}
@@ -600,6 +654,7 @@ class Canvas(QWidget):
             for node in self._get_selected_nodes():
                 init_pos = self._drag_start_positions[node['id']]
                 node['pos'] = (init_pos[0] + delta_world[0], init_pos[1] + delta_world[1])
+            self._update_graphs()
             self.update()
 
         pos = event.position()
@@ -616,6 +671,7 @@ class Canvas(QWidget):
             world_x = (new_center.x() - self._view_offset.x()) / self._zoom
             world_y = (new_center.y() - self._view_offset.y()) / self._zoom
             self.dragged_node['pos'] = (world_x, world_y)
+            self._update_graphs()
             self.update()
         elif self.pan_active and self.last_pan_point is not None:
             delta = pos - self.last_pan_point
@@ -638,6 +694,7 @@ class Canvas(QWidget):
 
         if self.dragged_node is not None:
             self.dragged_node = None
+            self._update_graphs()
 
         if self.selecting and self.selection_rect is not None:
             x_min, y_min, x_max, y_max = self.selection_rect
@@ -676,6 +733,7 @@ class Canvas(QWidget):
                 self._shift_press_node['selected'] = not self._shift_press_was_selected
             self._shift_press_node = None
             self.update()
+        self._update_graphs()
 
         super().mouseReleaseEvent(event)
 
@@ -736,6 +794,9 @@ class Canvas(QWidget):
         painter.translate(self._view_offset)
         painter.scale(self._zoom, self._zoom)
 
+        # Draw graph borders.
+        self._draw_graph_borders(painter)
+
         # Draw edges.
         self._draw_edges(painter)
 
@@ -747,6 +808,81 @@ class Canvas(QWidget):
         self._draw_nodes(painter)
 
         painter.restore()
+
+    def save_to_file(self, filename):
+        """
+        Save the current nodes and edges to a JSON file.
+
+        Parameters
+        ----------
+        filename : str
+            The path to the file.
+        """
+        data = {'nodes': self.nodes, 'edges': self.edges}
+        with open(filename, 'w') as f:
+            json.dump(data, f)
+
+    def load_from_file(self, filename):
+        """
+        Load nodes and edges from a JSON file.
+
+        Parameters
+        ----------
+        filename : str
+            The path to the file.
+        """
+        with open(filename, 'r') as f:
+            data = json.load(f)
+        self.nodes = data.get('nodes', [])
+        self.edges = data.get('edges', [])
+        self.update()
+
+    def add_node_at(self, pos, node_type):
+        """
+        Add a new node at the given widget position.
+
+        The position is converted to world coordinates based on the current view_offset and zoom.
+
+        Parameters
+        ----------
+        pos : QPointF
+            The position in widget coordinates.
+        node_type : str
+            The type of node to create ('bit' or 'parity_check').
+        """
+        adjusted_x = (pos.x() - self._view_offset.x()) / self._zoom
+        adjusted_y = (pos.y() - self._view_offset.y()) / self._zoom
+
+        # Ensure unique ID
+        new_id = max([n['id'] for n in self.nodes], default=-1) + 1
+
+        new_node = {
+            'id': new_id,
+            'pos': (adjusted_x, adjusted_y),
+            'type': node_type,
+            'selected': False
+        }
+        self.nodes.append(new_node)
+        self.update()
+
+    def get_node_by_id(self, node_id):
+        """
+        Return the node with the specified id.
+
+        Parameters
+        ----------
+        node_id : int
+            The node identifier.
+
+        Returns
+        -------
+        dict or None
+            The node dictionary, or None if not found.
+        """
+        for node in self.nodes:
+            if node['id'] == node_id:
+                return node
+        return None
 
     def _draw_edges(self, painter):
         for edge in self.edges:
@@ -909,77 +1045,6 @@ class Canvas(QWidget):
             # Reset brush for next node.
             painter.setBrush(Qt.NoBrush)
 
-    def save_to_file(self, filename):
-        """
-        Save the current nodes and edges to a JSON file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the file.
-        """
-        data = {'nodes': self.nodes, 'edges': self.edges}
-        with open(filename, 'w') as f:
-            json.dump(data, f)
-
-    def load_from_file(self, filename):
-        """
-        Load nodes and edges from a JSON file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the file.
-        """
-        with open(filename, 'r') as f:
-            data = json.load(f)
-        self.nodes = data.get('nodes', [])
-        self.edges = data.get('edges', [])
-        self.update()
-
-    def add_node_at(self, pos, node_type):
-        """
-        Add a new node at the given widget position.
-
-        The position is converted to world coordinates based on the current view_offset and zoom.
-
-        Parameters
-        ----------
-        pos : QPointF
-            The position in widget coordinates.
-        node_type : str
-            The type of node to create ('bit' or 'parity_check').
-        """
-        adjusted_x = (pos.x() - self._view_offset.x()) / self._zoom
-        adjusted_y = (pos.y() - self._view_offset.y()) / self._zoom
-        new_node = {
-            'id': len(self.nodes),
-            'pos': (adjusted_x, adjusted_y),
-            'type': node_type,
-            'selected': False
-        }
-        self.nodes.append(new_node)
-        self.update()
-
-    def get_node_by_id(self, node_id):
-        """
-        Return the node with the specified id.
-
-        Parameters
-        ----------
-        node_id : int
-            The node identifier.
-
-        Returns
-        -------
-        dict or None
-            The node dictionary, or None if not found.
-        """
-        for node in self.nodes:
-            if node['id'] == node_id:
-                return node
-        return None
-
     def _get_margin(self, node, dx, dy):
         """
         Compute the margin for edge clipping from a node's center.
@@ -1045,9 +1110,14 @@ class Canvas(QWidget):
         for edge in self.edges:
             edge['selected'] = False
 
+    def _deselect_all_graphs(self):
+        for graph in self.graphs:
+            graph['selected'] = False
+
     def _deselect_all(self):
         self._deselect_all_nodes()
         self._deselect_all_edges()
+        self._deselect_all_graphs()
 
     def _get_selected_nodes(self):
         return [node for node in self.nodes if node.get('selected', False)]
@@ -1268,3 +1338,239 @@ class Canvas(QWidget):
                             )
                             # Also update the count in case it changed
                             child.setText(f"Crossings: {self._get_crossing_number()}")
+
+    def _detect_connected_component(self, node_id):
+        """
+        Detect the connected component containing the given node.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the starting node.
+
+        Returns
+        -------
+        tuple
+            (nodes, edges) of the connected component.
+        """
+        # Get all nodes and edges.
+        all_nodes = {n['id']: n for n in self.nodes}
+        if not all_nodes:
+            return [], []
+
+        # BFS to find connected component.
+        visited = set()
+        queue = [node_id]
+        visited.add(node_id)
+
+        while queue:
+            current = queue.pop(0)
+            for edge in self.edges:
+                if edge['source'] == current and edge['target'] not in visited:
+                    queue.append(edge['target'])
+                    visited.add(edge['target'])
+                elif edge['target'] == current and edge['source'] not in visited:
+                    queue.append(edge['source'])
+                    visited.add(edge['source'])
+
+        # Get nodes in component.
+        component_nodes = [all_nodes[nid] for nid in visited]
+
+        # Get edges in component.
+        component_edges = [e for e in self.edges
+                           if e['source'] in visited and e['target'] in visited]
+
+        return component_nodes, component_edges
+
+    def _determine_graph_type(self, nodes):
+        """
+        Determine if a graph is classical or quantum.
+
+        Parameters
+        ----------
+        nodes : list
+            List of node dictionaries.
+
+        Returns
+        -------
+        str
+            'quantum' if any node is quantum, 'classical' otherwise.
+        """
+        quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+        for node in nodes:
+            if node['type'] in quantum_types:
+                return 'quantum'
+        return 'classical'
+
+    def _detect_graph_from_node(self, node_id):
+        """
+        Detect the graph connected to the given node and add it to self.graphs.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the starting node.
+        """
+        # Check if node is already part of a graph.
+        for graph in self.graphs:
+            if node_id in graph['node_ids']:
+                return  # Node is already in a graph.
+
+        # Detect the connected component.
+        nodes, _ = self._detect_connected_component(node_id)
+
+        # Only proceed if there are more than 2 nodes.
+        if len(nodes) <= 2:
+            return
+
+        # Determine graph type.
+        graph_type = self._determine_graph_type(nodes)
+
+        # Create graph record.
+        graph = {
+            'node_ids': {n['id'] for n in nodes},
+            'type': graph_type,
+            'selected': False
+        }
+
+        # Add to graphs list.
+        self.graphs.append(graph)
+        self.update()
+
+    def _detect_graph(self, node_id):
+        """
+        Handle the "Detect" menu option.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node that was right-clicked.
+        """
+        self._detect_graph_from_node(node_id)
+
+    def _update_graphs(self):
+        """
+        Update graphs based on current node positions and connections.
+        Removes graphs that no longer have enough nodes.
+        """
+        graphs_to_remove = []
+
+        for graph in self.graphs:
+            # Recalculate the connected components for each graph
+            if not graph['node_ids']:
+                graphs_to_remove.append(graph)
+                continue
+
+            # Pick any node from the graph and recalculate
+            any_node_id = next(iter(graph['node_ids'] & {n['id'] for n in self.nodes}), None)
+            if any_node_id is None:
+                graphs_to_remove.append(graph)
+                continue
+
+            # Recalculate nodes in this connected component
+            nodes, _ = self._detect_connected_component(any_node_id)
+
+            # Check if still has enough nodes
+            if len(nodes) <= 2:
+                graphs_to_remove.append(graph)
+                continue
+
+            # Update graph node IDs and type
+            graph['node_ids'] = {n['id'] for n in nodes}
+            graph['type'] = self._determine_graph_type(nodes)
+
+        # Remove graphs marked for removal
+        for graph in graphs_to_remove:
+            self.graphs.remove(graph)
+
+    def _draw_graph_borders(self, painter):
+        """
+        Draw borders around detected graphs.
+        """
+
+        for graph in self.graphs:
+            # Get current nodes in the graph
+            nodes = [n for n in self.nodes if n['id'] in graph['node_ids']]
+
+            # Skip if not enough nodes
+            if len(nodes) <= 2:
+                continue
+
+            # Determine border color based on graph type.
+            if graph['type'] == 'quantum':
+                border_color = self.theme_manager.graph_quantum
+            else:
+                border_color = self.theme_manager.graph_classical
+
+            # Highlight selected graphs.
+            if graph.get('selected', False):
+                pen = QPen(self.theme_manager.selected, 2.0)
+            else:
+                pen = QPen(border_color, 1.5)
+
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+
+            # Calculate bounding box for the graph.
+            min_x = min(n['pos'][0] for n in nodes)
+            min_y = min(n['pos'][1] for n in nodes)
+            max_x = max(n['pos'][0] for n in nodes)
+            max_y = max(n['pos'][1] for n in nodes)
+
+            # Add padding around the nodes.
+            padding = 20
+            rect = QRectF(min_x - padding, min_y - padding,
+                          max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+
+            # Draw the border with rounded corners.
+            painter.drawRoundedRect(rect, 5, 5)
+
+    def _get_graph_at(self, pos):
+        """
+        Check if a graph border is clicked.
+
+        Parameters
+        ----------
+        pos : QPointF
+            The position in widget coordinates.
+
+        Returns
+        -------
+        dict or None
+            The graph at the position, or None.
+        """
+        world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
+                            (pos.y() - self._view_offset.y()) / self._zoom)
+
+        for graph in self.graphs:
+            # Get current nodes in the graph.
+            nodes = [n for n in self.nodes if n['id'] in graph['node_ids']]
+
+            # Skip if not enough nodes.
+            if len(nodes) <= 2:
+                continue
+
+            # Calculate bounding box for the graph.
+            min_x = min(n['pos'][0] for n in nodes)
+            min_y = min(n['pos'][1] for n in nodes)
+            max_x = max(n['pos'][0] for n in nodes)
+            max_y = max(n['pos'][1] for n in nodes)
+
+            # Add padding around the nodes.
+            padding = 20
+            rect = QRectF(min_x - padding, min_y - padding,
+                          max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+
+            # Check if the border is clicked (within 5 pixels).
+            border_width = 5 / self._zoom  # Convert to world coordinates
+
+            # Create a "border zone" rect by inflating and deflating the graph rect
+            outer_rect = rect.adjusted(-border_width, -border_width, border_width, border_width)
+            inner_rect = rect.adjusted(border_width, border_width, -border_width, -border_width)
+
+            # Check if point is in the border zone (in outer but not in inner)
+            if outer_rect.contains(world_pos) and not inner_rect.contains(world_pos):
+                return graph
+
+        return None
