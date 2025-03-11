@@ -851,13 +851,7 @@ class Canvas(QWidget):
                 painter.translate(ip[0], ip[1])
                 painter.rotate(45)
 
-                # Use a light color that contrasts with the background.
-                if self.theme_manager.dark_mode:
-                    diamond_color = QColor(255, 255, 255, 180)
-                else:
-                    diamond_color = QColor(0, 0, 0, 180)
-
-                painter.setBrush(diamond_color)
+                painter.setBrush(self.theme_manager.crossing)
                 painter.setPen(Qt.NoPen)
                 painter.drawRect(QRectF(-size / 2, -size / 2, size, size))
                 painter.restore()
