@@ -25,8 +25,8 @@ class ThemeManager:
             self.menu_bg = QColor(45, 45, 45, 230)
             self.menu_selected = QColor(70, 70, 70, 230)
             self.menu_separator = QColor(100, 100, 100)
-            self.graph_classical = QColor("#4CAF50")
-            self.graph_quantum = QColor("#7B68EE")
+            self.graph_classical = QColor("#828282")
+            self.graph_quantum = QColor("#424289")
         else:
             # Light theme colors.
             self.background = QColor("#FFFFFF")
@@ -42,8 +42,8 @@ class ThemeManager:
             self.menu_bg = QColor(245, 245, 245, 230)
             self.menu_selected = QColor(230, 230, 230, 230)
             self.menu_separator = QColor(220, 220, 220)
-            self.graph_classical = QColor("#4CAF50")
-            self.graph_quantum = QColor("#7B68EE")
+            self.graph_classical = QColor("#7D7D7D")
+            self.graph_quantum = QColor("#8686D9")
 
         self.selected.setAlpha(60)
 

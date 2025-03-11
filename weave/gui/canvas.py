@@ -102,6 +102,8 @@ class Canvas(QWidget):
 
         # Initialize graph detection.
         self.graphs = []  # each entry: {'node_ids': set(), 'type': 'quantum' or 'classical', 'selected': bool}
+        self.graph_drag = None  # Reference to the graph being dragged
+        self.graph_drag_initial_positions = {}  # Store initial positions of nodes in the graph
 
         # Selection state.
         self.selecting = False  # whether a rectangular selection is active
@@ -262,6 +264,12 @@ class Canvas(QWidget):
         elif event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
             # Reset zoom with animation.
             self.smooth_zoom_to(1.0)
+            return
+        elif event.key() == Qt.Key_O and event.modifiers() & Qt.ControlModifier:
+            self._load_canvas()
+            return
+        elif event.key() == Qt.Key_S and event.modifiers() & Qt.ControlModifier:
+            self._save_canvas()
             return
         elif event.key() == Qt.Key_Equal and event.modifiers() & Qt.ControlModifier:
             # Zoom in with animation.
@@ -640,6 +648,26 @@ class Canvas(QWidget):
         """
         pos = event.position()  # QPointF
         if event.button() == Qt.LeftButton:
+            clicked_graph = self._get_graph_at(pos)
+            if clicked_graph:
+                # Handle selection (same as before)
+                if event.modifiers() & Qt.ShiftModifier:
+                    clicked_graph['selected'] = True
+                else:
+                    self._deselect_all()
+                    clicked_graph['selected'] = True
+
+                # Also set up for dragging
+                self.graph_drag = clicked_graph
+                self.graph_drag_initial_positions = {
+                    node['id']: node['pos']
+                    for node in self.nodes
+                    if node['id'] in clicked_graph['node_ids']
+                }
+                self.drag_start = pos
+                self.update()
+                return
+
             clicked_node = self._get_node_at(pos)
             if clicked_node:
                 if event.modifiers() & Qt.ControlModifier:
@@ -708,6 +736,35 @@ class Canvas(QWidget):
         self.update()
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click to select all nodes in a graph."""
+        pos = event.position()
+
+        # Check if double-clicked on a graph border
+        graph = self._get_graph_at(pos)
+        if graph:
+            # Deselect the graph border itself
+            graph['selected'] = False
+
+            # Select all nodes in the graph
+            for node in self.nodes:
+                if node['id'] in graph['node_ids']:
+                    node['selected'] = True
+
+            # Set up drag positions in case user wants to drag right after double-clicking
+            self._drag_start_positions = {
+                node['id']: node['pos']
+                for node in self.nodes
+                if node['id'] in graph['node_ids'] and node['selected']
+            }
+            self.drag_start = pos
+
+            self.update()
+            event.accept()
+            return
+
+        super().mouseDoubleClickEvent(event)
+
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.drag_start is not None:
             delta = event.position() - self.drag_start
@@ -719,6 +776,19 @@ class Canvas(QWidget):
             self.update()
 
         pos = event.position()
+
+        if self.graph_drag is not None and self.drag_start is not None:
+            delta = event.position() - self.drag_start
+            delta_world = (delta.x() / self._zoom, delta.y() / self._zoom)
+
+            for node in self.nodes:
+                if node['id'] in self.graph_drag['node_ids']:
+                    init_pos = self.graph_drag_initial_positions[node['id']]
+                    node['pos'] = (init_pos[0] + delta_world[0], init_pos[1] + delta_world[1])
+
+            self.update()
+            return
+
         if self.selecting:
             current = ((pos.x() - self._view_offset.x()) / self._zoom,
                        (pos.y() - self._view_offset.y()) / self._zoom)
@@ -756,6 +826,10 @@ class Canvas(QWidget):
         if self.dragged_node is not None:
             self.dragged_node = None
             self._update_graphs()
+
+        if self.graph_drag is not None:
+            self.graph_drag = None
+            self.graph_drag_initial_positions = {}
 
         if self.selecting and self.selection_rect is not None:
             x_min, y_min, x_max, y_max = self.selection_rect
@@ -871,27 +945,18 @@ class Canvas(QWidget):
         painter.restore()
 
     def save_to_file(self, filename):
-        """
-        Save the current nodes, edges, and graphs to a file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the file.
-        """
-        # Convert graph node_ids from sets to lists for JSON serialization
+        """Save the current nodes, edges, and graphs to a file."""
         serializable_graphs = []
         for graph in self.graphs:
             serializable_graph = {
                 'node_ids': list(graph['node_ids']),
-                'type': graph['type'],
-                'selected': graph.get('selected', False)
+                'type': graph['type']
             }
             serializable_graphs.append(serializable_graph)
 
         data = {
-            'nodes': self.nodes,
-            'edges': self.edges,
+            'nodes': [{k: v for k, v in node.items() if k != 'selected'} for node in self.nodes],
+            'edges': [{k: v for k, v in edge.items() if k != 'selected'} for edge in self.edges],
             'graphs': serializable_graphs,
             'view_offset': [self._view_offset.x(), self._view_offset.y()],
             'zoom': self._zoom
@@ -901,36 +966,26 @@ class Canvas(QWidget):
             json.dump(data, f)
 
     def load_from_file(self, filename):
-        """
-        Load nodes, edges, and graphs from a file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the file.
-        """
+        """Load nodes, edges, and graphs from a file."""
         with open(filename, 'r') as f:
             data = json.load(f)
 
-        self.nodes = data.get('nodes', [])
-        self.edges = data.get('edges', [])
+        self.nodes = [dict(node, selected=False) for node in data.get('nodes', [])]
+        self.edges = [dict(edge, selected=False) for edge in data.get('edges', [])]
 
-        # Convert graph node_ids from lists back to sets
         self.graphs = []
         for graph_data in data.get('graphs', []):
             graph = {
                 'node_ids': set(graph_data['node_ids']),
                 'type': graph_data['type'],
-                'selected': graph_data.get('selected', False)
+                'selected': False
             }
             self.graphs.append(graph)
 
-        # Restore view state if available
         if 'view_offset' in data and 'zoom' in data:
             self._view_offset = QPointF(data['view_offset'][0], data['view_offset'][1])
             self._zoom = data['zoom']
 
-        self._deselect_all()
         self.update()
 
     def add_node_at(self, pos, node_type):
@@ -1271,7 +1326,7 @@ class Canvas(QWidget):
         """
         world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
                             (pos.y() - self._view_offset.y()) / self._zoom)
-        threshold = 5 / self._zoom
+        threshold = 10 / self._zoom
         for edge in self.edges:
             source = self.get_node_by_id(edge['source'])
             target = self.get_node_by_id(edge['target'])
@@ -1598,16 +1653,6 @@ class Canvas(QWidget):
             else:
                 border_color = self.theme_manager.graph_classical
 
-            # Highlight selected graphs.
-            if graph.get('selected', False):
-                pen = QPen(self.theme_manager.selected, 2.0)
-            else:
-                pen = QPen(border_color, 1.5)
-
-            pen.setStyle(Qt.DashLine)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-
             # Calculate bounding box for the graph.
             min_x = min(n['pos'][0] for n in nodes)
             min_y = min(n['pos'][1] for n in nodes)
@@ -1619,8 +1664,18 @@ class Canvas(QWidget):
             rect = QRectF(min_x - padding, min_y - padding,
                           max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
 
-            # Draw the border with rounded corners.
-            painter.drawRoundedRect(rect, 5, 5)
+            painter.setPen(QPen(border_color, 1.5))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect, 3, 3)
+
+            if graph.get('selected', False):
+                highlight_size = 5
+                highlight_color = self.theme_manager.selected
+
+                pen = QPen(highlight_color, highlight_size)
+                pen.setCapStyle(Qt.FlatCap)
+                painter.setPen(pen)
+                painter.drawRoundedRect(rect, 3, 3)
 
     def _get_graph_at(self, pos):
         """
@@ -1657,15 +1712,13 @@ class Canvas(QWidget):
             padding = 20
             rect = QRectF(min_x - padding, min_y - padding,
                           max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+            border_width = 10 / self._zoom  # Convert to world coordinates
 
-            # Check if the border is clicked (within 5 pixels).
-            border_width = 5 / self._zoom  # Convert to world coordinates
-
-            # Create a "border zone" rect by inflating and deflating the graph rect
+            # Create a "border zone" rect by inflating and deflating the graph rect.
             outer_rect = rect.adjusted(-border_width, -border_width, border_width, border_width)
             inner_rect = rect.adjusted(border_width, border_width, -border_width, -border_width)
 
-            # Check if point is in the border zone (in outer but not in inner)
+            # Check if point is in the border zone (in outer but not in inner).
             if outer_rect.contains(world_pos) and not inner_rect.contains(world_pos):
                 return graph
 
