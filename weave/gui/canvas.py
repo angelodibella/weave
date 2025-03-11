@@ -2,9 +2,9 @@ import json
 import math
 from typing import Any
 
-from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel, QFileDialog
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent, QRadialGradient, QIcon, QPixmap, \
-    QLinearGradient, QBrush, QAction
+    QLinearGradient, QBrush, QAction, QPainterPath
 from PySide6.QtCore import Qt, QPointF, QRectF, QPropertyAnimation, QEasingCurve, Property
 
 from .theme import ThemeManager
@@ -408,6 +408,13 @@ class Canvas(QWidget):
         clear_action = self._hamburger_menu.addAction("Clear Canvas", self._clear_canvas)
         clear_action.setIcon(self._get_clear_icon())
 
+        # Add Save/Load Canvas options
+        save_action = self._hamburger_menu.addAction("Save Canvas", self._save_canvas)
+        save_action.setIcon(self._get_save_icon())
+
+        load_action = self._hamburger_menu.addAction("Load Canvas", self._load_canvas)
+        load_action.setIcon(self._get_load_icon())
+
         # Add separator.
         self._hamburger_menu.addSeparator()
 
@@ -507,6 +514,60 @@ class Canvas(QWidget):
 
         painter.end()
 
+        icon.addPixmap(pixmap)
+        return icon
+
+    def _get_save_icon(self):
+        """Create a save icon for the menu."""
+        icon = QIcon()
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw a simple floppy disk icon.
+        painter.setPen(QPen(self.theme_manager.foreground, 1))
+        painter.setBrush(Qt.NoBrush)
+
+        # Draw the floppy disk body.
+        painter.drawRect(3, 3, 10, 10)
+
+        # Draw the metal insert.
+        painter.drawRect(5, 4, 6, 3)
+
+        # Draw the write-protect tab.
+        painter.drawRect(11, 8, 2, 3)
+
+        painter.end()
+        icon.addPixmap(pixmap)
+        return icon
+
+    def _get_load_icon(self):
+        """Create a load icon for the menu."""
+        icon = QIcon()
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw a simple folder icon.
+        painter.setPen(QPen(self.theme_manager.foreground, 1))
+        painter.setBrush(Qt.NoBrush)
+
+        # Draw the folder.
+        painter.drawRect(3, 5, 10, 8)
+
+        # Draw the folder tab.
+        path = QPainterPath()
+        path.moveTo(3, 5)
+        path.lineTo(6, 3)
+        path.lineTo(9, 3)
+        path.lineTo(9, 5)
+        painter.drawPath(path)
+
+        painter.end()
         icon.addPixmap(pixmap)
         return icon
 
@@ -811,20 +872,37 @@ class Canvas(QWidget):
 
     def save_to_file(self, filename):
         """
-        Save the current nodes and edges to a JSON file.
+        Save the current nodes, edges, and graphs to a file.
 
         Parameters
         ----------
         filename : str
             The path to the file.
         """
-        data = {'nodes': self.nodes, 'edges': self.edges}
+        # Convert graph node_ids from sets to lists for JSON serialization
+        serializable_graphs = []
+        for graph in self.graphs:
+            serializable_graph = {
+                'node_ids': list(graph['node_ids']),
+                'type': graph['type'],
+                'selected': graph.get('selected', False)
+            }
+            serializable_graphs.append(serializable_graph)
+
+        data = {
+            'nodes': self.nodes,
+            'edges': self.edges,
+            'graphs': serializable_graphs,
+            'view_offset': [self._view_offset.x(), self._view_offset.y()],
+            'zoom': self._zoom
+        }
+
         with open(filename, 'w') as f:
             json.dump(data, f)
 
     def load_from_file(self, filename):
         """
-        Load nodes and edges from a JSON file.
+        Load nodes, edges, and graphs from a file.
 
         Parameters
         ----------
@@ -833,8 +911,26 @@ class Canvas(QWidget):
         """
         with open(filename, 'r') as f:
             data = json.load(f)
+
         self.nodes = data.get('nodes', [])
         self.edges = data.get('edges', [])
+
+        # Convert graph node_ids from lists back to sets
+        self.graphs = []
+        for graph_data in data.get('graphs', []):
+            graph = {
+                'node_ids': set(graph_data['node_ids']),
+                'type': graph_data['type'],
+                'selected': graph_data.get('selected', False)
+            }
+            self.graphs.append(graph)
+
+        # Restore view state if available
+        if 'view_offset' in data and 'zoom' in data:
+            self._view_offset = QPointF(data['view_offset'][0], data['view_offset'][1])
+            self._zoom = data['zoom']
+
+        self._deselect_all()
         self.update()
 
     def add_node_at(self, pos, node_type):
@@ -1574,3 +1670,28 @@ class Canvas(QWidget):
                 return graph
 
         return None
+
+    def _save_canvas(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Canvas",
+            "",
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            # Add .json extension if not present
+            if not file_path.endswith('.json'):
+                file_path += '.json'
+            self.save_to_file(file_path)
+
+    def _load_canvas(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Canvas",
+            "",
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            self.load_from_file(file_path)
