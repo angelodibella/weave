@@ -159,18 +159,6 @@ class Canvas(QWidget):
     # Animations
     # ------------------------------------------------------------
 
-    def _setup_animations(self):
-        """Setup animations for UI elements."""
-        # Zoom animation.
-        self._zoom_animation = QPropertyAnimation(self, b"zoom_level")
-        self._zoom_animation.setDuration(150)
-        self._zoom_animation.setEasingCurve(QEasingCurve.OutCubic)
-
-        # Pan animation.
-        self._pan_animation = QPropertyAnimation(self, b"pan_offset")
-        self._pan_animation.setDuration(150)
-        self._pan_animation.setEasingCurve(QEasingCurve.OutCubic)
-
     def smooth_zoom_to(self, new_zoom, center_pos=None):
         """
         Smoothly zoom to a new level with animation.
@@ -220,6 +208,18 @@ class Canvas(QWidget):
         self._zoom_animation.start()
         self._pan_animation.start()
 
+    def _setup_animations(self):
+        """Setup animations for UI elements."""
+        # Zoom animation.
+        self._zoom_animation = QPropertyAnimation(self, b"zoom_level")
+        self._zoom_animation.setDuration(150)
+        self._zoom_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        # Pan animation.
+        self._pan_animation = QPropertyAnimation(self, b"pan_offset")
+        self._pan_animation.setDuration(150)
+        self._pan_animation.setEasingCurve(QEasingCurve.OutCubic)
+
     def _set_dark_mode(self, checked):
         # Remember if the hamburger menu was open.
         hamburger_was_open = self._hamburger_menu is not None
@@ -253,88 +253,6 @@ class Canvas(QWidget):
     def _set_show_crossings(self, checked):
         self.show_crossings = checked
         self.update()
-
-    def keyPressEvent(self, event: QKeyEvent):
-        """
-        Ctrl+0: Reset zoom to default.
-        Ctrl+=: Zoom in.
-        Ctrl+-: Zoom out.
-        Ctrl+A: Select all nodes.
-        Escape: Deselect all objects.
-        Delete/Backspace: Remove selected objects.
-        """
-        if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
-            # Select all nodes.
-            for node in self.nodes:
-                node['selected'] = True
-            self.update()
-            return
-        elif event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
-            # Reset zoom with animation.
-            self.smooth_zoom_to(1.0)
-            return
-        elif event.key() == Qt.Key_O and event.modifiers() & Qt.ControlModifier:
-            self._load_canvas()
-            return
-        elif event.key() == Qt.Key_S and event.modifiers() & Qt.ControlModifier:
-            self._save_canvas()
-            return
-        elif event.key() == Qt.Key_Equal and event.modifiers() & Qt.ControlModifier:
-            # Zoom in with animation.
-            new_zoom = min(self._zoom * 1.2, 5.0)
-            self.smooth_zoom_to(new_zoom)
-            return
-        elif event.key() == Qt.Key_Minus and event.modifiers() & Qt.ControlModifier:
-            # Zoom out with animation.
-            new_zoom = max(self._zoom / 1.2, 0.2)
-            self.smooth_zoom_to(new_zoom)
-            return
-        elif event.key() == Qt.Key_Escape:
-            self._deselect_all()
-        elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
-            selected_nodes = self._get_selected_nodes()
-            if selected_nodes:
-                ids_to_remove = {node['id'] for node in selected_nodes}
-                self.nodes = [n for n in self.nodes if n['id'] not in ids_to_remove]
-                self.edges = [e for e in self.edges if
-                              e['source'] not in ids_to_remove and e['target'] not in ids_to_remove]
-                self._deselect_all()
-                self._update_graphs()
-            else:
-                selected_edges = self._get_selected_edges()
-                if selected_edges:
-                    for edge in selected_edges:
-                        self.edges.remove(edge)
-                    self._deselect_all()
-                    self._update_graphs()
-                else:
-                    # Check for selected graphs.
-                    selected_graphs = [g for g in self.graphs if g.get('selected', False)]
-                    if selected_graphs:
-                        for graph in selected_graphs:
-                            self.graphs.remove(graph)
-                        self.update()
-            self.update()
-
-        self.update()
-        super().keyPressEvent(event)
-
-    def wheelEvent(self, event: QWheelEvent):
-        delta = event.angleDelta().y()
-        factor = 1.1 if delta > 0 else 0.9
-
-        # Calculate new zoom level within limits.
-        new_zoom = self._zoom * factor
-        new_zoom = max(0.2, min(new_zoom, 5.0))
-
-        # Don't animate tiny changes.
-        if abs(new_zoom - self._zoom) < 0.01:
-            return
-
-        # Perform zoom with the cursor position as the center.
-        self.smooth_zoom_to(new_zoom, event.position())
-
-        event.accept()
 
     # ------------------------------------------------------------
     # Main Menu
@@ -589,6 +507,133 @@ class Canvas(QWidget):
         icon.addPixmap(pixmap)
         return icon
 
+    def _position_hamburger(self):
+        margin = 10
+        self.hamburger.move(self.width() - self.hamburger.width() - margin, margin)
+
+    def _on_menu_hide(self):
+        if hasattr(self, 'hamburger'):
+            self.hamburger.set_open(False)
+        self._hamburger_menu = None
+
+    def _on_crossings_toggled(self, checked):
+        self.show_crossings = checked
+        self.update()
+
+    def _on_dark_mode_toggled(self, checked):
+        # Update theme immediately.
+        self.theme_manager.set_dark_mode(checked)
+
+        # Force canvas to update with new colors.
+        self.update()
+
+        # Update the existing menu in-place if it's open.
+        if self._hamburger_menu:
+            # Store the current position.
+            menu_pos = self._hamburger_menu.pos()
+
+            # Update menu styles without closing it.
+            self._hamburger_menu.setStyleSheet(self.theme_manager.get_menu_style())
+
+            # Update all toggle widgets in the menu.
+            for action in self._hamburger_menu.actions():
+                if isinstance(action, QWidgetAction):
+                    widget = action.defaultWidget()
+                    if widget:
+                        # Update all labels in the widget.
+                        for child in widget.findChildren(QLabel):
+                            child.setStyleSheet(
+                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; "
+                                f"font-size: 12px; color: {self.theme_manager.foreground.name()};"
+                            )
+
+            # Update the crossing number display if present.
+            self._update_crossing_display()
+
+            # Update the hamburger icon.
+            if hasattr(self, 'hamburger'):
+                self.hamburger.update()
+
+    def _create_custom_toggle(self, label_text, initial, callback):
+        """
+        Create a toggle widget that doesn't auto-close the menu.
+
+        Parameters
+        ----------
+        label_text : str
+            Text label for the toggle.
+        initial : bool
+            Initial state of the toggle.
+        callback : function
+            Function to call when toggle state changes.
+
+        Returns
+        -------
+        QWidget
+            The widget containing the toggle.
+        """
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(8, 4, 8, 4)
+
+        # Create label.
+        label = QLabel(label_text)
+        label.setStyleSheet(
+            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
+        )
+
+        # Create toggle with pre-set state.
+        toggle = ToggleSwitch(initial, widget)
+
+        # Connect the toggle after setting up the preventMenuClose attribute.
+        toggle.toggled.connect(lambda checked: self._handle_toggle(callback, checked))
+
+        # Add label and toggle in correct order.
+        layout.addWidget(label)
+        layout.addStretch()
+        layout.addWidget(toggle)
+
+        return widget
+
+    def _handle_toggle(self, callback, checked):
+        """
+        Handle toggle changes without closing the menu.
+
+        Parameters
+        ----------
+        callback : function
+            The callback to call.
+        checked : bool
+            The new toggle state.
+        """
+        callback(checked)
+        # Keep the hamburger menu open.
+        if self._hamburger_menu:
+            # Refocus on menu to prevent auto-close.
+            self._hamburger_menu.setFocus()
+
+    def _update_crossing_display(self):
+        if not self._hamburger_menu:
+            return
+
+        # Look for the crossing number display
+        for action in self._hamburger_menu.actions():
+            if isinstance(action, QWidgetAction):
+                widget = action.defaultWidget()
+                if widget:
+                    # Look for a label with "Crossings:" text
+                    for child in widget.findChildren(QLabel):
+                        if "Crossings:" in child.text():
+                            # Update the label with current theme
+                            child.setStyleSheet(
+                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; "
+                                f"font-size: 12px; color: {self.theme_manager.foreground.name()};"
+                            )
+                            # Also update the count in case it changed
+                            child.setText(f"Crossings: {self._get_crossing_number()}")
+
+    # ------------------------------------------------------------
+    # Overridden Qt Methods
     # ------------------------------------------------------------
 
     def contextMenuEvent(self, event):
@@ -650,6 +695,88 @@ class Canvas(QWidget):
             if len(self._get_selected_nodes()) == 1:
                 node["selected"] = False
             self.update()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """
+        Ctrl+0: Reset zoom to default.
+        Ctrl+=: Zoom in.
+        Ctrl+-: Zoom out.
+        Ctrl+A: Select all nodes.
+        Escape: Deselect all objects.
+        Delete/Backspace: Remove selected objects.
+        """
+        if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
+            # Select all nodes.
+            for node in self.nodes:
+                node['selected'] = True
+            self.update()
+            return
+        elif event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
+            # Reset zoom with animation.
+            self.smooth_zoom_to(1.0)
+            return
+        elif event.key() == Qt.Key_O and event.modifiers() & Qt.ControlModifier:
+            self._load_canvas()
+            return
+        elif event.key() == Qt.Key_S and event.modifiers() & Qt.ControlModifier:
+            self._save_canvas()
+            return
+        elif event.key() == Qt.Key_Equal and event.modifiers() & Qt.ControlModifier:
+            # Zoom in with animation.
+            new_zoom = min(self._zoom * 1.2, 5.0)
+            self.smooth_zoom_to(new_zoom)
+            return
+        elif event.key() == Qt.Key_Minus and event.modifiers() & Qt.ControlModifier:
+            # Zoom out with animation.
+            new_zoom = max(self._zoom / 1.2, 0.2)
+            self.smooth_zoom_to(new_zoom)
+            return
+        elif event.key() == Qt.Key_Escape:
+            self._deselect_all()
+        elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            selected_nodes = self._get_selected_nodes()
+            if selected_nodes:
+                ids_to_remove = {node['id'] for node in selected_nodes}
+                self.nodes = [n for n in self.nodes if n['id'] not in ids_to_remove]
+                self.edges = [e for e in self.edges if
+                              e['source'] not in ids_to_remove and e['target'] not in ids_to_remove]
+                self._deselect_all()
+                self._update_graphs()
+            else:
+                selected_edges = self._get_selected_edges()
+                if selected_edges:
+                    for edge in selected_edges:
+                        self.edges.remove(edge)
+                    self._deselect_all()
+                    self._update_graphs()
+                else:
+                    # Check for selected graphs.
+                    selected_graphs = [g for g in self.graphs if g.get('selected', False)]
+                    if selected_graphs:
+                        for graph in selected_graphs:
+                            self.graphs.remove(graph)
+                        self.update()
+            self.update()
+
+        self.update()
+        super().keyPressEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent):
+        delta = event.angleDelta().y()
+        factor = 1.1 if delta > 0 else 0.9
+
+        # Calculate new zoom level within limits.
+        new_zoom = self._zoom * factor
+        new_zoom = max(0.2, min(new_zoom, 5.0))
+
+        # Don't animate tiny changes.
+        if abs(new_zoom - self._zoom) < 0.01:
+            return
+
+        # Perform zoom with the cursor position as the center.
+        self.smooth_zoom_to(new_zoom, event.position())
+
+        event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):
         """
@@ -954,6 +1081,10 @@ class Canvas(QWidget):
 
         painter.restore()
 
+    # ------------------------------------------------------------
+    # Public Interface
+    # ------------------------------------------------------------
+
     def save_to_file(self, filename):
         """Save the current nodes, edges, and graphs to a file."""
         serializable_graphs = []
@@ -1044,6 +1175,10 @@ class Canvas(QWidget):
             if node['id'] == node_id:
                 return node
         return None
+
+    # ------------------------------------------------------------
+    # Private Interface
+    # ------------------------------------------------------------
 
     def _draw_edges(self, painter):
         for edge in self.edges:
@@ -1206,6 +1341,49 @@ class Canvas(QWidget):
             # Reset brush for next node.
             painter.setBrush(Qt.NoBrush)
 
+    def _draw_graph_borders(self, painter):
+        """
+        Draw borders around detected graphs.
+        """
+
+        for graph in self.graphs:
+            # Get current nodes in the graph
+            nodes = [n for n in self.nodes if n['id'] in graph['node_ids']]
+
+            # Skip if not enough nodes
+            if len(nodes) <= 2:
+                continue
+
+            # Determine border color based on graph type.
+            if graph['type'] == 'quantum':
+                border_color = self.theme_manager.graph_quantum
+            else:
+                border_color = self.theme_manager.graph_classical
+
+            # Calculate bounding box for the graph.
+            min_x = min(n['pos'][0] for n in nodes)
+            min_y = min(n['pos'][1] for n in nodes)
+            max_x = max(n['pos'][0] for n in nodes)
+            max_y = max(n['pos'][1] for n in nodes)
+
+            # Add padding around the nodes.
+            padding = 20
+            rect = QRectF(min_x - padding, min_y - padding,
+                          max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+
+            painter.setPen(QPen(border_color, 1.5))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect, 3, 3)
+
+            if graph.get('selected', False):
+                highlight_size = 5
+                highlight_color = self.theme_manager.selected
+
+                pen = QPen(highlight_color, highlight_size)
+                pen.setCapStyle(Qt.FlatCap)
+                painter.setPen(pen)
+                painter.drawRoundedRect(rect, 3, 3)
+
     def _get_margin(self, node, dx, dy):
         """
         Compute the margin for edge clipping from a node's center.
@@ -1263,6 +1441,81 @@ class Canvas(QWidget):
                 return node
         return None
 
+    def _get_edge_at(self, pos):
+        """
+        Return the edge at the given widget position, if any.
+
+        Parameters
+        ----------
+        pos : QPointF
+            The position in widget coordinates.
+
+        Returns
+        -------
+        dict or None
+            The edge at the position, or None if not found.
+        """
+        world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
+                            (pos.y() - self._view_offset.y()) / self._zoom)
+        threshold = 10 / self._zoom
+        for edge in self.edges:
+            source = self.get_node_by_id(edge['source'])
+            target = self.get_node_by_id(edge['target'])
+            if source is None or target is None:
+                continue
+            a = QPointF(source['pos'][0], source['pos'][1])
+            b = QPointF(target['pos'][0], target['pos'][1])
+            if _distance_point_to_segment(world_pos, a, b) <= threshold:
+                return edge
+        return None
+
+    def _get_graph_at(self, pos):
+        """
+        Check if a graph border is clicked.
+
+        Parameters
+        ----------
+        pos : QPointF
+            The position in widget coordinates.
+
+        Returns
+        -------
+        dict or None
+            The graph at the position, or None.
+        """
+        world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
+                            (pos.y() - self._view_offset.y()) / self._zoom)
+
+        for graph in self.graphs:
+            # Get current nodes in the graph.
+            nodes = [n for n in self.nodes if n['id'] in graph['node_ids']]
+
+            # Skip if not enough nodes.
+            if len(nodes) <= 2:
+                continue
+
+            # Calculate bounding box for the graph.
+            min_x = min(n['pos'][0] for n in nodes)
+            min_y = min(n['pos'][1] for n in nodes)
+            max_x = max(n['pos'][0] for n in nodes)
+            max_y = max(n['pos'][1] for n in nodes)
+
+            # Add padding around the nodes.
+            padding = 20
+            rect = QRectF(min_x - padding, min_y - padding,
+                          max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+            border_width = 10 / self._zoom  # Convert to world coordinates
+
+            # Create a "border zone" rect by inflating and deflating the graph rect.
+            outer_rect = rect.adjusted(-border_width, -border_width, border_width, border_width)
+            inner_rect = rect.adjusted(border_width, border_width, -border_width, -border_width)
+
+            # Check if point is in the border zone (in outer but not in inner).
+            if outer_rect.contains(world_pos) and not inner_rect.contains(world_pos):
+                return graph
+
+        return None
+
     def _deselect_all_nodes(self):
         for node in self.nodes:
             node['selected'] = False
@@ -1283,14 +1536,14 @@ class Canvas(QWidget):
     def _get_selected_nodes(self):
         return [node for node in self.nodes if node.get('selected', False)]
 
-    def _get_selected_edges(self):
-        return [edge for edge in self.edges if edge.get('selected', False)]
-
     def _get_selected_node(self):
         for node in self.nodes:
             if node.get('selected', False):
                 return node
         return None
+
+    def _get_selected_edges(self):
+        return [edge for edge in self.edges if edge.get('selected', False)]
 
     def _get_selected_edge(self):
         for edge in self.edges:
@@ -1320,38 +1573,6 @@ class Canvas(QWidget):
                 return True
         return False
 
-    def _get_edge_at(self, pos):
-        """
-        Return the edge at the given widget position, if any.
-
-        Parameters
-        ----------
-        pos : QPointF
-            The position in widget coordinates.
-
-        Returns
-        -------
-        dict or None
-            The edge at the position, or None if not found.
-        """
-        world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
-                            (pos.y() - self._view_offset.y()) / self._zoom)
-        threshold = 10 / self._zoom
-        for edge in self.edges:
-            source = self.get_node_by_id(edge['source'])
-            target = self.get_node_by_id(edge['target'])
-            if source is None or target is None:
-                continue
-            a = QPointF(source['pos'][0], source['pos'][1])
-            b = QPointF(target['pos'][0], target['pos'][1])
-            if _distance_point_to_segment(world_pos, a, b) <= threshold:
-                return edge
-        return None
-
-    def _position_hamburger(self):
-        margin = 10
-        self.hamburger.move(self.width() - self.hamburger.width() - margin, margin)
-
     def _get_crossing_number(self) -> int:
         quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
         qnodes = {node['id']: node for node in self.nodes if node['type'] in quantum_types}
@@ -1378,127 +1599,6 @@ class Canvas(QWidget):
         self.nodes = []
         self.edges = []
         self.update()
-
-    def _on_menu_hide(self):
-        if hasattr(self, 'hamburger'):
-            self.hamburger.set_open(False)
-        self._hamburger_menu = None
-
-    def _create_custom_toggle(self, label_text, initial, callback):
-        """
-        Create a toggle widget that doesn't auto-close the menu.
-
-        Parameters
-        ----------
-        label_text : str
-            Text label for the toggle.
-        initial : bool
-            Initial state of the toggle.
-        callback : function
-            Function to call when toggle state changes.
-
-        Returns
-        -------
-        QWidget
-            The widget containing the toggle.
-        """
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(8, 4, 8, 4)
-
-        # Create label.
-        label = QLabel(label_text)
-        label.setStyleSheet(
-            f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; color: {self.theme_manager.foreground.name()};"
-        )
-
-        # Create toggle with pre-set state.
-        toggle = ToggleSwitch(initial, widget)
-
-        # Connect the toggle after setting up the preventMenuClose attribute.
-        toggle.toggled.connect(lambda checked: self._handle_toggle(callback, checked))
-
-        # Add label and toggle in correct order.
-        layout.addWidget(label)
-        layout.addStretch()
-        layout.addWidget(toggle)
-
-        return widget
-
-    def _handle_toggle(self, callback, checked):
-        """
-        Handle toggle changes without closing the menu.
-
-        Parameters
-        ----------
-        callback : function
-            The callback to call.
-        checked : bool
-            The new toggle state.
-        """
-        callback(checked)
-        # Keep the hamburger menu open.
-        if self._hamburger_menu:
-            # Refocus on menu to prevent auto-close.
-            self._hamburger_menu.setFocus()
-
-    def _on_crossings_toggled(self, checked):
-        self.show_crossings = checked
-        self.update()
-
-    def _on_dark_mode_toggled(self, checked):
-        # Update theme immediately.
-        self.theme_manager.set_dark_mode(checked)
-
-        # Force canvas to update with new colors.
-        self.update()
-
-        # Update the existing menu in-place if it's open.
-        if self._hamburger_menu:
-            # Store the current position.
-            menu_pos = self._hamburger_menu.pos()
-
-            # Update menu styles without closing it.
-            self._hamburger_menu.setStyleSheet(self.theme_manager.get_menu_style())
-
-            # Update all toggle widgets in the menu.
-            for action in self._hamburger_menu.actions():
-                if isinstance(action, QWidgetAction):
-                    widget = action.defaultWidget()
-                    if widget:
-                        # Update all labels in the widget.
-                        for child in widget.findChildren(QLabel):
-                            child.setStyleSheet(
-                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; "
-                                f"font-size: 12px; color: {self.theme_manager.foreground.name()};"
-                            )
-
-            # Update the crossing number display if present.
-            self._update_crossing_display()
-
-            # Update the hamburger icon.
-            if hasattr(self, 'hamburger'):
-                self.hamburger.update()
-
-    def _update_crossing_display(self):
-        if not self._hamburger_menu:
-            return
-
-        # Look for the crossing number display
-        for action in self._hamburger_menu.actions():
-            if isinstance(action, QWidgetAction):
-                widget = action.defaultWidget()
-                if widget:
-                    # Look for a label with "Crossings:" text
-                    for child in widget.findChildren(QLabel):
-                        if "Crossings:" in child.text():
-                            # Update the label with current theme
-                            child.setStyleSheet(
-                                f"font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; "
-                                f"font-size: 12px; color: {self.theme_manager.foreground.name()};"
-                            )
-                            # Also update the count in case it changed
-                            child.setText(f"Crossings: {self._get_crossing_number()}")
 
     def _detect_connected_component(self, node_id):
         """
@@ -1543,7 +1643,8 @@ class Canvas(QWidget):
 
         return component_nodes, component_edges
 
-    def _determine_graph_type(self, nodes):
+    @staticmethod
+    def _determine_graph_type(nodes):
         """
         Determine if a graph is classical or quantum.
 
@@ -1643,96 +1744,6 @@ class Canvas(QWidget):
         # Remove graphs marked for removal
         for graph in graphs_to_remove:
             self.graphs.remove(graph)
-
-    def _draw_graph_borders(self, painter):
-        """
-        Draw borders around detected graphs.
-        """
-
-        for graph in self.graphs:
-            # Get current nodes in the graph
-            nodes = [n for n in self.nodes if n['id'] in graph['node_ids']]
-
-            # Skip if not enough nodes
-            if len(nodes) <= 2:
-                continue
-
-            # Determine border color based on graph type.
-            if graph['type'] == 'quantum':
-                border_color = self.theme_manager.graph_quantum
-            else:
-                border_color = self.theme_manager.graph_classical
-
-            # Calculate bounding box for the graph.
-            min_x = min(n['pos'][0] for n in nodes)
-            min_y = min(n['pos'][1] for n in nodes)
-            max_x = max(n['pos'][0] for n in nodes)
-            max_y = max(n['pos'][1] for n in nodes)
-
-            # Add padding around the nodes.
-            padding = 20
-            rect = QRectF(min_x - padding, min_y - padding,
-                          max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
-
-            painter.setPen(QPen(border_color, 1.5))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(rect, 3, 3)
-
-            if graph.get('selected', False):
-                highlight_size = 5
-                highlight_color = self.theme_manager.selected
-
-                pen = QPen(highlight_color, highlight_size)
-                pen.setCapStyle(Qt.FlatCap)
-                painter.setPen(pen)
-                painter.drawRoundedRect(rect, 3, 3)
-
-    def _get_graph_at(self, pos):
-        """
-        Check if a graph border is clicked.
-
-        Parameters
-        ----------
-        pos : QPointF
-            The position in widget coordinates.
-
-        Returns
-        -------
-        dict or None
-            The graph at the position, or None.
-        """
-        world_pos = QPointF((pos.x() - self._view_offset.x()) / self._zoom,
-                            (pos.y() - self._view_offset.y()) / self._zoom)
-
-        for graph in self.graphs:
-            # Get current nodes in the graph.
-            nodes = [n for n in self.nodes if n['id'] in graph['node_ids']]
-
-            # Skip if not enough nodes.
-            if len(nodes) <= 2:
-                continue
-
-            # Calculate bounding box for the graph.
-            min_x = min(n['pos'][0] for n in nodes)
-            min_y = min(n['pos'][1] for n in nodes)
-            max_x = max(n['pos'][0] for n in nodes)
-            max_y = max(n['pos'][1] for n in nodes)
-
-            # Add padding around the nodes.
-            padding = 20
-            rect = QRectF(min_x - padding, min_y - padding,
-                          max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
-            border_width = 10 / self._zoom  # Convert to world coordinates
-
-            # Create a "border zone" rect by inflating and deflating the graph rect.
-            outer_rect = rect.adjusted(-border_width, -border_width, border_width, border_width)
-            inner_rect = rect.adjusted(border_width, border_width, -border_width, -border_width)
-
-            # Check if point is in the border zone (in outer but not in inner).
-            if outer_rect.contains(world_pos) and not inner_rect.contains(world_pos):
-                return graph
-
-        return None
 
     def _save_canvas(self):
         file_path, _ = QFileDialog.getSaveFileName(
