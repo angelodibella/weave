@@ -187,28 +187,36 @@ class Canvas(QWidget):
 
         old_zoom = self._zoom
 
-        # Calculate the world point under the cursor.
-        world_point = QPointF(
-            (center_pos.x() - self._view_offset.x()) / old_zoom,
-            (center_pos.y() - self._view_offset.y()) / old_zoom
-        )
+        # Current offset.
+        old_offset_x = self._view_offset.x()
+        old_offset_y = self._view_offset.y()
 
-        # Calculate new view offset to keep world point fixed.
-        new_offset = center_pos - world_point * new_zoom
+        # Screen coordinates of the zoom center.
+        screen_x = center_pos.x()
+        screen_y = center_pos.y()
+
+        # Calculate the world coordinates of the point under the cursor.
+        world_x = (screen_x - old_offset_x) / old_zoom
+        world_y = (screen_y - old_offset_y) / old_zoom
+
+        # Calculate the new offset that keeps this world point at the same screen position.
+        new_offset_x = screen_x - world_x * new_zoom
+        new_offset_y = screen_y - world_y * new_zoom
+
+        # Create QPointF for animation.
+        new_offset = QPointF(new_offset_x, new_offset_y)
 
         # Stop any running animations.
         self._zoom_animation.stop()
         self._pan_animation.stop()
 
-        # Setup and start zoom animation.
+        # Setup and start animations.
         self._zoom_animation.setStartValue(old_zoom)
         self._zoom_animation.setEndValue(new_zoom)
 
-        # Setup and start pan animation.
         self._pan_animation.setStartValue(self._view_offset)
         self._pan_animation.setEndValue(new_offset)
 
-        # Start animations together.
         self._zoom_animation.start()
         self._pan_animation.start()
 
@@ -323,8 +331,10 @@ class Canvas(QWidget):
         if abs(new_zoom - self._zoom) < 0.01:
             return
 
-        # Perform smooth zoom centered on cursor.
+        # Perform zoom with the cursor position as the center.
         self.smooth_zoom_to(new_zoom, event.position())
+
+        event.accept()
 
     # ------------------------------------------------------------
     # Main Menu
