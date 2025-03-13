@@ -1,6 +1,6 @@
 [project]
 name = "weave"
-version = "0.2.0-alpha"
+version = "0.3.0-alpha"
 description = "A quantum error correction framework that can implement and visualize qubit cross-talk."
 authors = [
     { name = "angelo", email = "angelo.dibella2020@gmail.com" }
