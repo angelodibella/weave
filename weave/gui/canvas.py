@@ -882,6 +882,60 @@ class Canvas(QWidget):
         self.update()
         super().mousePressEvent(event)
 
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self.pan_active:
+            self.pan_active = False
+            self.last_pan_point = None
+
+        if self.dragged_node is not None:
+            self.dragged_node = None
+            self._update_graphs()
+
+        if self.graph_drag is not None:
+            self.graph_drag = None
+            self.graph_drag_initial_positions = {}
+
+        if self.selecting and self.selection_rect is not None:
+            x_min, y_min, x_max, y_max = self.selection_rect
+            if self.selection_mode == "node":
+                for node in self.nodes:
+                    x, y = node['pos']
+                    if x_min <= x <= x_max and y_min <= y <= y_max:
+                        node['selected'] = True
+            elif self.selection_mode == "edge":
+                for edge in self.edges:
+                    source = self.get_node_by_id(edge['source'])
+                    target = self.get_node_by_id(edge['target'])
+                    if source and target:
+                        x1, y1 = source['pos']
+                        x2, y2 = target['pos']
+
+                        # Select edge if both endpoints are inside the rectangle.
+                        if (x_min <= x1 <= x_max and y_min <= y1 <= y_max and
+                                x_min <= x2 <= x_max and y_min <= y2 <= y_max):
+                            edge['selected'] = True
+            self.selecting = False
+            self.selection_rect_start = None
+            self.selection_rect = None
+            self.selection_mode = None
+            self.drag_start = None
+            self._drag_start_positions = {}
+            self.update()
+
+        self.drag_start = None
+        self._drag_start_positions = {}
+
+        if hasattr(self, '_shift_press_node') and self._shift_press_node is not None:
+            # If there was minimal movement (i.e. no drag occurred), toggle the node's selection.
+            if (event.position() - self._shift_press_pos).manhattanLength() < 10:
+                # Toggle the selection: if it was selected, deselect it; if it was not, select it.
+                self._shift_press_node['selected'] = not self._shift_press_was_selected
+            self._shift_press_node = None
+            self.update()
+        self._update_graphs()
+
+        super().mouseReleaseEvent(event)
+
     def mouseDoubleClickEvent(self, event):
         """Handle double-click to select all nodes in a graph."""
         pos = event.position()
@@ -981,60 +1035,6 @@ class Canvas(QWidget):
 
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        if self.pan_active:
-            self.pan_active = False
-            self.last_pan_point = None
-
-        if self.dragged_node is not None:
-            self.dragged_node = None
-            self._update_graphs()
-
-        if self.graph_drag is not None:
-            self.graph_drag = None
-            self.graph_drag_initial_positions = {}
-
-        if self.selecting and self.selection_rect is not None:
-            x_min, y_min, x_max, y_max = self.selection_rect
-            if self.selection_mode == "node":
-                for node in self.nodes:
-                    x, y = node['pos']
-                    if x_min <= x <= x_max and y_min <= y <= y_max:
-                        node['selected'] = True
-            elif self.selection_mode == "edge":
-                for edge in self.edges:
-                    source = self.get_node_by_id(edge['source'])
-                    target = self.get_node_by_id(edge['target'])
-                    if source and target:
-                        x1, y1 = source['pos']
-                        x2, y2 = target['pos']
-
-                        # Select edge if both endpoints are inside the rectangle.
-                        if (x_min <= x1 <= x_max and y_min <= y1 <= y_max and
-                                x_min <= x2 <= x_max and y_min <= y2 <= y_max):
-                            edge['selected'] = True
-            self.selecting = False
-            self.selection_rect_start = None
-            self.selection_rect = None
-            self.selection_mode = None
-            self.drag_start = None
-            self._drag_start_positions = {}
-            self.update()
-
-        self.drag_start = None
-        self._drag_start_positions = {}
-
-        if hasattr(self, '_shift_press_node') and self._shift_press_node is not None:
-            # If there was minimal movement (i.e. no drag occurred), toggle the node's selection.
-            if (event.position() - self._shift_press_pos).manhattanLength() < 10:
-                # Toggle the selection: if it was selected, deselect it; if it was not, select it.
-                self._shift_press_node['selected'] = not self._shift_press_was_selected
-            self._shift_press_node = None
-            self.update()
-        self._update_graphs()
-
-        super().mouseReleaseEvent(event)
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_hamburger()
@@ -1046,8 +1046,15 @@ class Canvas(QWidget):
         # Fill background.
         painter.fillRect(self.rect(), self.theme_manager.background)
 
-        # ----- Draw grid (triangular lattice) in widget coordinates -----
-        spacing = 20
+        # --- Draw grid (triangular lattice) ---
+        base_spacing = 10
+        min_dot_spacing = 15
+
+        # Calculate adaptive spacing based on zoom.
+        dot_spacing = base_spacing
+        while dot_spacing * self._zoom < min_dot_spacing:
+            dot_spacing *= 2
+
         dot_radius = 1
         painter.setPen(QPen(self.theme_manager.grid, 0.5))
 
@@ -1056,41 +1063,32 @@ class Canvas(QWidget):
         voy = self._view_offset.y()
         width = self.width()
         height = self.height()
-        min_n = math.floor((-vox) / spacing)
-        max_n = math.ceil((width - vox) / spacing)
-        min_m = math.floor((-voy) / spacing)
-        max_m = math.ceil((height - voy) / spacing)
 
-        for m in range(min_m, max_m + 1):
-            y = m * spacing + voy
-            row_offset = spacing / 2 if (m % 2 != 0) else 0
-            for n in range(min_n, max_n + 1):
-                x = n * spacing + vox + row_offset
+        # Calculate grid bounds with adaptive spacing.
+        min_n = math.floor((-vox) / (dot_spacing * self._zoom))
+        max_n = math.ceil((width - vox) / (dot_spacing * self._zoom))
+        min_m = math.floor((-voy) / (dot_spacing * self._zoom))
+        max_m = math.ceil((height - voy) / (dot_spacing * self._zoom))
+
+        # Apply a skip factor if there would be too many dots.
+        max_dots = 2000
+        total_dots = (max_n - min_n + 1) * (max_m - min_m + 1)
+        if total_dots > max_dots:
+            skip = max(1, int(math.sqrt(total_dots / max_dots)))
+        else:
+            skip = 1
+
+        # Draw the dots with adaptive skip.
+        for m in range(min_m, max_m + 1, skip):
+            y = m * (dot_spacing * self._zoom) + voy
+            row_offset = (dot_spacing * self._zoom) / 2 if (m % 2 != 0) else 0
+            for n in range(min_n, max_n + 1, skip):
+                x = n * (dot_spacing * self._zoom) + vox + row_offset
                 painter.drawEllipse(QPointF(x, y), dot_radius, dot_radius)
 
         # Draw snap grid.
         if self.grid_mode:
-            grid_size = self.grid_size * self._zoom
-            painter.setPen(QPen(self.theme_manager.selected, 1))
-
-            # Calculate grid limits based on view.
-            vox = self._view_offset.x()
-            voy = self._view_offset.y()
-            width = self.width()
-            height = self.height()
-
-            min_x = int((0 - vox) / grid_size) * grid_size + vox
-            max_x = int((width - vox) / grid_size + 1) * grid_size + vox
-            min_y = int((0 - voy) / grid_size) * grid_size + voy
-            max_y = int((height - voy) / grid_size + 1) * grid_size + voy
-
-            # Draw horizontal grid lines.
-            for y in range(int(min_y), int(max_y) + 1, int(grid_size)):
-                painter.drawLine(int(min_x), y, int(max_x), y)
-
-            # Draw vertical grid lines.
-            for x in range(int(min_x), int(max_x) + 1, int(grid_size)):
-                painter.drawLine(x, int(min_y), x, int(max_y))
+            self._draw_snap_grid(painter)
 
         # Draw selection area.
         if self.selecting and self.selection_rect is not None:
@@ -1437,6 +1435,62 @@ class Canvas(QWidget):
                 pen.setCapStyle(Qt.FlatCap)
                 painter.setPen(pen)
                 painter.drawRoundedRect(rect, 3, 3)
+
+    def _draw_snap_grid(self, painter):
+        """Draw the snap grid."""
+        min_grid_spacing = 20
+        screen_grid_size = self.grid_size * self._zoom
+
+        # Determine grid scale factor based on zoom level.
+        grid_scale = 1
+        while screen_grid_size < min_grid_spacing:
+            grid_scale *= 2
+            screen_grid_size = self.grid_size * grid_scale * self._zoom
+
+        world_grid_size = self.grid_size * grid_scale
+
+        # Calculate world coordinate bounds.
+        min_world_x = (0 - self._view_offset.x()) / self._zoom
+        max_world_x = (self.width() - self._view_offset.x()) / self._zoom
+        min_world_y = (0 - self._view_offset.y()) / self._zoom
+        max_world_y = (self.height() - self._view_offset.y()) / self._zoom
+
+        # Align to multiples of the scaled grid size.
+        world_start_x = math.floor(min_world_x / world_grid_size) * world_grid_size
+        world_end_x = math.ceil(max_world_x / world_grid_size) * world_grid_size
+        world_start_y = math.floor(min_world_y / world_grid_size) * world_grid_size
+        world_end_y = math.ceil(max_world_y / world_grid_size) * world_grid_size
+
+        # Calculate number of grid lines needed.
+        x_count = int((world_end_x - world_start_x) / world_grid_size) + 1
+        y_count = int((world_end_y - world_start_y) / world_grid_size) + 1
+
+        # Limit total number of lines but apply same skip factor to both dimensions.
+        max_lines = 100
+        if x_count + y_count > max_lines:
+            skip = max(1, int(math.sqrt((x_count + y_count) / max_lines * 2)))
+        else:
+            skip = 1
+
+        painter.save()
+
+        painter.translate(self._view_offset)
+        painter.scale(self._zoom, self._zoom)
+
+        pen = QPen(self.theme_manager.selected, 1 / self._zoom)
+        painter.setPen(pen)
+
+        # Draw horizontal grid lines with skip.
+        for i in range(0, y_count, skip):
+            y = world_start_y + i * world_grid_size
+            painter.drawLine(world_start_x, y, world_end_x, y)
+
+        # Draw vertical grid lines with same skip.
+        for i in range(0, x_count, skip):
+            x = world_start_x + i * world_grid_size
+            painter.drawLine(x, world_start_y, x, world_end_y)
+
+        painter.restore()
 
     def _get_margin(self, node, dx, dy):
         """
