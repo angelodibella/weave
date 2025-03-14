@@ -3,5 +3,4 @@ __pycache__/
 .vscode/
 .idea/
 .venv
-examples/Debug.ipynb
-examples/weave_dump/
+research/
