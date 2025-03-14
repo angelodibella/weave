@@ -742,7 +742,7 @@ class Canvas(QWidget):
         elif event.key() == Qt.Key_C and event.modifiers() & Qt.ControlModifier:
             self._copy_selected()
             return
-        elif event.key() == Qt.Key_C and event.modifiers() & Qt.ControlModifier:
+        elif event.key() == Qt.Key_V and event.modifiers() & Qt.ControlModifier:
             cursor_pos = self.mapFromGlobal(self.cursor().pos())
             self._paste_at(cursor_pos)
             return
