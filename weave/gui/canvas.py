@@ -121,6 +121,10 @@ class Canvas(QWidget):
         self._shift_press_pos = None  # store position of shift-click
         self._shift_press_was_selected = False  # store node's selection state before shift-click
 
+        # Add grid snap mode.
+        self.grid_mode = False
+        self.grid_size = 2 * self.node_radius
+
         # Display options.
         self.show_crossings = True
 
@@ -702,6 +706,7 @@ class Canvas(QWidget):
         Ctrl+=: Zoom in.
         Ctrl+-: Zoom out.
         Ctrl+A: Select all nodes.
+        G: Toggle grid mode.
         Escape: Deselect all objects.
         Delete/Backspace: Remove selected objects.
         """
@@ -730,6 +735,10 @@ class Canvas(QWidget):
             # Zoom out with animation.
             new_zoom = max(self._zoom / 1.2, 0.2)
             self.smooth_zoom_to(new_zoom)
+            return
+        elif event.key() == Qt.Key_G:
+            self.grid_mode = not self.grid_mode
+            self.update()
             return
         elif event.key() == Qt.Key_Escape:
             self._deselect_all()
@@ -908,7 +917,16 @@ class Canvas(QWidget):
             delta_world = (delta.x() / self._zoom, delta.y() / self._zoom)
             for node in self._get_selected_nodes():
                 init_pos = self._drag_start_positions[node['id']]
-                node['pos'] = (init_pos[0] + delta_world[0], init_pos[1] + delta_world[1])
+                # Calculate new position.
+                new_x = init_pos[0] + delta_world[0]
+                new_y = init_pos[1] + delta_world[1]
+
+                # Snap to grid if grid mode is active.
+                if self.grid_mode:
+                    new_x = round(new_x / self.grid_size) * self.grid_size
+                    new_y = round(new_y / self.grid_size) * self.grid_size
+
+                node['pos'] = (new_x, new_y)
             self._update_graphs()
             self.update()
 
@@ -921,8 +939,16 @@ class Canvas(QWidget):
             for node in self.nodes:
                 if node['id'] in self.graph_drag['node_ids']:
                     init_pos = self.graph_drag_initial_positions[node['id']]
-                    node['pos'] = (init_pos[0] + delta_world[0], init_pos[1] + delta_world[1])
+                    # Calculate new position.
+                    new_x = init_pos[0] + delta_world[0]
+                    new_y = init_pos[1] + delta_world[1]
 
+                    # Snap to grid if grid mode is active.
+                    if self.grid_mode:
+                        new_x = round(new_x / self.grid_size) * self.grid_size
+                        new_y = round(new_y / self.grid_size) * self.grid_size
+
+                    node['pos'] = (new_x, new_y)
             self.update()
             return
 
@@ -1042,6 +1068,30 @@ class Canvas(QWidget):
                 x = n * spacing + vox + row_offset
                 painter.drawEllipse(QPointF(x, y), dot_radius, dot_radius)
 
+        # Draw snap grid.
+        if self.grid_mode:
+            grid_size = self.grid_size * self._zoom
+            painter.setPen(QPen(self.theme_manager.selected, 1))
+
+            # Calculate grid limits based on view.
+            vox = self._view_offset.x()
+            voy = self._view_offset.y()
+            width = self.width()
+            height = self.height()
+
+            min_x = int((0 - vox) / grid_size) * grid_size + vox
+            max_x = int((width - vox) / grid_size + 1) * grid_size + vox
+            min_y = int((0 - voy) / grid_size) * grid_size + voy
+            max_y = int((height - voy) / grid_size + 1) * grid_size + voy
+
+            # Draw horizontal grid lines.
+            for y in range(int(min_y), int(max_y) + 1, int(grid_size)):
+                painter.drawLine(int(min_x), y, int(max_x), y)
+
+            # Draw vertical grid lines.
+            for x in range(int(min_x), int(max_x) + 1, int(grid_size)):
+                painter.drawLine(x, int(min_y), x, int(max_y))
+
         # Draw selection area.
         if self.selecting and self.selection_rect is not None:
             painter.setPen(Qt.NoPen)
@@ -1145,7 +1195,11 @@ class Canvas(QWidget):
         adjusted_x = (pos.x() - self._view_offset.x()) / self._zoom
         adjusted_y = (pos.y() - self._view_offset.y()) / self._zoom
 
-        # Ensure unique ID
+        if self.grid_mode:
+            adjusted_x = round(adjusted_x / self.grid_size) * self.grid_size
+            adjusted_y = round(adjusted_y / self.grid_size) * self.grid_size
+
+        # Ensure unique ID.
         new_id = max([n['id'] for n in self.nodes], default=-1) + 1
 
         new_node = {
