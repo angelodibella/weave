@@ -111,6 +111,11 @@ class Canvas(QWidget):
         self.selection_rect = None  # current selection rectangle (x_min, y_min, x_max, y_max)
         self.selection_mode = None  # "node" or "edge" selection mode
 
+        # Clipboard.
+        self.clipboard_nodes = []
+        self.clipboard_edges = []
+        self.clipboard_center = None
+
         # Drag state.
         self.drag_start = None  # world coordinate of the start of a drag
         self._drag_start_positions = {}  # dictionary to store initial positions of selected nodes when starting a drag
@@ -664,7 +669,7 @@ class Canvas(QWidget):
         quantum_menu.addAction("New Z-Stabilizer", lambda: self.add_node_at(event.pos(), "Z_stabilizer"))
         quantum_menu.addAction("New X-Stabilizer", lambda: self.add_node_at(event.pos(), "X_stabilizer"))
 
-        # Check if we're clicking on a node
+        # Check if we're clicking on a node.
         pos = event.pos()
         node = self._get_node_at(pos)
 
@@ -680,16 +685,28 @@ class Canvas(QWidget):
             detect_action.triggered.connect(lambda: self._detect_graph(node['id']))
             menu.addAction(detect_action)
 
-            # Check if node's graph would have more than 2 nodes
+            # Check if node's graph would have more than 2 nodes.
             nodes, _ = self._detect_connected_component(node['id'])
             detect_action.setEnabled(len(nodes) > 2)
 
-            # Check if node is already in a detected graph
+            # Check if node is already in a detected graph.
             for graph in self.graphs:
                 if node['id'] in graph['node_ids']:
                     detect_action.setEnabled(False)
                     break
 
+            # Add copy option for selected nodes.
+            copy_action = menu.addAction("Copy", lambda: self._copy_selected())
+            copy_action.setEnabled(len(self._get_selected_nodes()) > 0)
+
+        # Add paste option (if clipboard has content).
+        if not node:
+            menu.addSeparator()
+        paste_action = menu.addAction("Paste", lambda: self._paste_at(pos))
+        paste_action.setEnabled(self.can_paste())
+
+        if node:
+            menu.addSeparator()
             menu.addAction("Save Code as CSV", lambda: print("Save functionality not implemented yet."))
 
         menu.exec(event.globalPos())
@@ -706,19 +723,28 @@ class Canvas(QWidget):
         Ctrl+=: Zoom in.
         Ctrl+-: Zoom out.
         Ctrl+A: Select all nodes.
+        Ctrl+C: Copy selected nodes.
+        Ctrl+V: Paste copied nodes at cursor position.
         G: Toggle grid mode.
         Escape: Deselect all objects.
         Delete/Backspace: Remove selected objects.
         """
-        if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
+        if event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
+            # Reset zoom with animation.
+            self.smooth_zoom_to(1.0)
+            return
+        elif event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
             # Select all nodes.
             for node in self.nodes:
                 node['selected'] = True
             self.update()
             return
-        elif event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
-            # Reset zoom with animation.
-            self.smooth_zoom_to(1.0)
+        elif event.key() == Qt.Key_C and event.modifiers() & Qt.ControlModifier:
+            self._copy_selected()
+            return
+        elif event.key() == Qt.Key_C and event.modifiers() & Qt.ControlModifier:
+            cursor_pos = self.mapFromGlobal(self.cursor().pos())
+            self._paste_at(cursor_pos)
             return
         elif event.key() == Qt.Key_O and event.modifiers() & Qt.ControlModifier:
             self._load_canvas()
@@ -1227,6 +1253,10 @@ class Canvas(QWidget):
             if node['id'] == node_id:
                 return node
         return None
+
+    def can_paste(self):
+        """Check if there are nodes in the clipboard."""
+        return len(self.clipboard_nodes) > 0
 
     # ------------------------------------------------------------
     # Private Interface
@@ -1877,3 +1907,86 @@ class Canvas(QWidget):
 
         if file_path:
             self.load_from_file(file_path)
+
+    def _copy_selected(self):
+        """Copy selected nodes and their interconnecting edges to clipboard."""
+        selected_nodes = self._get_selected_nodes()
+        if not selected_nodes:
+            return False
+
+        # Get IDs of selected nodes.
+        selected_ids = {node['id'] for node in selected_nodes}
+
+        # Copy selected nodes.
+        self.clipboard_nodes = [node.copy() for node in selected_nodes]
+
+        # Copy edges that connect selected nodes.
+        self.clipboard_edges = []
+        for edge in self.edges:
+            if edge['source'] in selected_ids and edge['target'] in selected_ids:
+                self.clipboard_edges.append(edge.copy())
+
+        # Calculate the center of selected nodes for paste positioning.
+        if self.clipboard_nodes:
+            avg_x = sum(node['pos'][0] for node in self.clipboard_nodes) / len(self.clipboard_nodes)
+            avg_y = sum(node['pos'][1] for node in self.clipboard_nodes) / len(self.clipboard_nodes)
+            self.clipboard_center = (avg_x, avg_y)
+
+        return True
+
+    def _paste_at(self, pos):
+        """Paste copied nodes at the specified position."""
+        if not self.clipboard_nodes:
+            return False
+
+        # Convert position to world coordinates.
+        world_x = (pos.x() - self._view_offset.x()) / self._zoom
+        world_y = (pos.y() - self._view_offset.y()) / self._zoom
+
+        # Snap to grid if grid mode is active.
+        if self.grid_mode:
+            world_x = round(world_x / self.grid_size) * self.grid_size
+            world_y = round(world_y / self.grid_size) * self.grid_size
+
+        # Calculate offset from clipboard center to paste position.
+        offset_x = world_x - self.clipboard_center[0]
+        offset_y = world_y - self.clipboard_center[1]
+
+        # Create a mapping from old IDs to new IDs.
+        next_id = max([n['id'] for n in self.nodes], default=-1) + 1
+        id_mapping = {}
+        new_nodes = []
+
+        # Deselect all existing objects.
+        self._deselect_all()
+
+        # Create new nodes.
+        for old_node in self.clipboard_nodes:
+            new_node = old_node.copy()
+            old_id = new_node['id']
+            new_node['id'] = next_id
+            id_mapping[old_id] = next_id
+            next_id += 1
+
+            # Update position with offset.
+            old_x, old_y = new_node['pos']
+            new_node['pos'] = (old_x + offset_x, old_y + offset_y)
+
+            # Set as selected.
+            new_node['selected'] = True
+
+            new_nodes.append(new_node)
+
+        # Add new nodes to canvas.
+        self.nodes.extend(new_nodes)
+
+        # Create new edges.
+        for old_edge in self.clipboard_edges:
+            new_edge = old_edge.copy()
+            new_edge['source'] = id_mapping[old_edge['source']]
+            new_edge['target'] = id_mapping[old_edge['target']]
+            new_edge['selected'] = False
+            self.edges.append(new_edge)
+
+        self.update()
+        return True
