@@ -1,4 +1,4 @@
-![Canvas example](doc/images/surface_code_canvas.png)
+![Canvas example](docs/images/surface_code_canvas.png)
 
 # Weave
 
