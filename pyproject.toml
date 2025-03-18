@@ -1,14 +1,12 @@
 [build-system]
-requires = ["scikit-build-core", "pybind11"]
+requires = ["scikit-build-core>=0.8.0", "pybind11>=2.11.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "weave"
 version = "0.3.0-alpha"
 description = "A quantum error correction framework that can implement and visualize qubit cross-talk."
-authors = [
-    { name = "angelo", email = "angelo.dibella2020@gmail.com" }
-]
+authors = [{ name = "Angelo Di Bella", email = "angelo.dibella2020@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10, <3.14"
@@ -22,9 +20,32 @@ dependencies = [
     "ldpc >=0.1.53",
     "networkx >=3.4.2",
     "notebook >=7.2.2",
-    "pyside6 >=6.8"
+    "pyside6 >=6.8",
 ]
 
+[project.scripts]
+weave = "weave.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest >=7.4.0"]
+
 [tool.scikit-build]
-wheel.expand-macos-universal-tags = true
-minimum-version = "build-system.requires"
+cmake.minimum-version = "3.15"
+cmake.args = []
+wheel.packages = ["weave"]
+sdist.include = [
+    "weave/*.py",
+    "weave/**/*.py",
+    "weave/**/*.pyi",
+    "weave/_core/include/weave/*.hpp",
+    "weave/_core/include/weave/**/*.hpp",
+    "weave/_core/include/bindings/*.hpp",
+    "weave/_core/include/bindings/**/*.hpp",
+    "weave/_core/src/codes/*.cpp",
+    "weave/_core/src/util/*.cpp",
+    "weave/_core/src/bindings/*.cpp",
+]
+wheel.license-files = ["LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
