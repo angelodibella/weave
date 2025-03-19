@@ -1,0 +1,3 @@
+[submodule "weave/_core/lib/eigen"]
+	path = weave/_core/lib/eigen
+	url = https://gitlab.com/libeigen/eigen.git
