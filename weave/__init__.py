@@ -2,22 +2,19 @@
 Weave: A quantum error correction framework
 """
 
-from ._core import (
-    NoiseModel,
-    HypergraphProductCode,
-    StabilizerCode,
-)
+# Import NoiseModel directly from _core.codes.
+from ._core.codes import NoiseModel
 
-from .simulator import CodeSimulator
-from .codes import SurfaceCode
+# Import utility submodules to expose at the top level.
+from ._core.util import pcm, graph
 
 __all__ = [
-    # C++ bindings
+    # C++ components at top level.
     "NoiseModel",
-    "HypergraphProductCode",
-    "StabilizerCode",
     
-    # Pure Python components
-    "CodeSimulator",
-    "SurfaceCode",
+    # Utility submodules.
+    "pcm",
+    "graph",
+    
+    # Pure Python components (to be added)
 ]
