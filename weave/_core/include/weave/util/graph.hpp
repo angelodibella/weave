@@ -1,48 +1,35 @@
 #pragma once
 
+#include <optional>
+#include <set>
 #include <vector>
-#include <unordered_map>
-#include <string>
-#include <memory>
 
 namespace weave {
 namespace util {
 
-class Node;
-class Edge;
+/**
+ * Find all edge crossings in a graph.
+ *
+ * @param pos The positions of the nodes in the graph.
+ * @param edges The edges in the graph.
+ * @return A set of sets of pairs of edges that cross each other.
+ */
+std::set<std::set<std::pair<int, int>>> find_edge_crossings(const std::vector<std::pair<float, float>>& pos,
+                                                            const std::vector<std::pair<int, int>>& edges);
 
 /**
- * Graph utility class
- * Represents a graph structure for quantum code representations
+ * Find the intersection of two lines.
+ *
+ * @param a The first point of the first line.
+ * @param b The second point of the first line.
+ * @param c The first point of the second line.
+ * @param d The second point of the second line.
+ * @return The intersection point if it exists.
  */
-class Graph {
-public:
-    Graph() = default;
-    
-    // Node operations
-    void addNode(int id, const std::string& type = "data");
-    void removeNode(int id);
-    std::shared_ptr<Node> getNode(int id) const;
-    std::vector<std::shared_ptr<Node>> getNodes() const;
-    
-    // Edge operations
-    void addEdge(int sourceId, int targetId, const std::string& type = "");
-    void removeEdge(int sourceId, int targetId);
-    std::vector<std::shared_ptr<Edge>> getEdges() const;
-    
-    // Graph operations
-    void clear();
-    size_t nodeCount() const;
-    size_t edgeCount() const;
-    
-    // Serialization
-    std::string toJson() const;
-    static Graph fromJson(const std::string& json);
-    
-private:
-    std::unordered_map<int, std::shared_ptr<Node>> m_nodes;
-    std::vector<std::shared_ptr<Edge>> m_edges;
-};
+std::optional<std::pair<float, float>> line_intersection(const std::pair<float, float>& a,
+                                                         const std::pair<float, float>& b,
+                                                         const std::pair<float, float>& c,
+                                                         const std::pair<float, float>& d);
 
-} // namespace util
-} // namespace weave
+}  // namespace util
+}  // namespace weave

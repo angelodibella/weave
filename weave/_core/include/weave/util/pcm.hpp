@@ -1,38 +1,17 @@
 #pragma once
 
-#include <vector>
-#include <string>
+#include <Eigen/Dense>
 
 namespace weave {
 namespace util {
 
 /**
- * Parity Check Matrix (PCM) utility class
- * Provides operations for working with parity check matrices
+ * Construct the parity-check matrix for a repetition code.
+ *
+ * @param n Length of the repetition code.
+ * @return An (n-1) x n parity-check matrix.
  */
-class PCM {
-public:
-    PCM() = default;
-    explicit PCM(const std::vector<std::vector<int>>& matrix);
-    
-    // Basic operations
-    void setMatrix(const std::vector<std::vector<int>>& matrix);
-    std::vector<std::vector<int>> getMatrix() const;
-    
-    // Dimensions
-    size_t rows() const;
-    size_t cols() const;
-    
-    // Matrix operations
-    PCM transpose() const;
-    
-    // Generate Tanner graph representation
-    // (In real implementation, this would return a Graph object)
-    void generateTannerGraph() const;
-    
-private:
-    std::vector<std::vector<int>> m_matrix;
-};
+Eigen::MatrixXi repetition(int n);
 
-} // namespace util
-} // namespace weave
+}  // namespace util
+}  // namespace weave

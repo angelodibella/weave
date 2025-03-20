@@ -1,20 +1,18 @@
+#include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "bindings/noise_model.pybind.hpp"
-#include "bindings/hypergraph_product_code.pybind.hpp"
-#include "bindings/stabilizer_code.pybind.hpp"
-
-#define STRINGIFY(x) #x
-#define MACRO_STRINGIFY(x) STRINGIFY(x)
+#include "bindings/codes.pybind.hpp"
+#include "bindings/util.pybind.hpp"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
-    m.doc() = "Weave: A quantum error correction framework.";
+    m.doc() = "Weave quantum error correction library core C++ bindings";
 
-    // Register all the bindings
-    weave::bindings::bind_noise_model(m);
-    weave::bindings::bind_hypergraph_product_code(m);
-    weave::bindings::bind_stabilizer_code(m);
+    // Bind utility functions.
+    weave::bindings::bind_util(m);
+
+    // Bind codes.
+    weave::bindings::bind_codes(m);
 }

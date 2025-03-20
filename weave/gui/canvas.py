@@ -33,7 +33,7 @@ from PySide6.QtCore import (
 
 from .theme import ThemeManager
 from .components import ToggleSwitch, MenuIcon
-from ..util.graph import find_edge_crossings, line_intersection
+from .._core.util.graph import find_edge_crossings, line_intersection
 
 
 def _is_valid_connection(source: dict[str, Any], target: dict[str, Any]) -> bool:
