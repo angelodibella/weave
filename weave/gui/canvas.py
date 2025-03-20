@@ -1442,9 +1442,8 @@ class Canvas(QWidget):
 
         # For each crossing, compute approximate intersection and draw a diamond.
         crossings = find_edge_crossings(pos_list, edge_list)
-        for crossing in crossings:
-            # Each crossing is a frozenset of two edges, extract them.
-            edge_pair = list(crossing)
+        for edge_pair in crossings:
+            # Each edge_pair is a list of two edges
             e1, e2 = edge_pair[0], edge_pair[1]
 
             # Get the endpoints (in world coordinates) for each edge.

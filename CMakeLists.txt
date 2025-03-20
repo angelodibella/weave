@@ -22,9 +22,6 @@ find_package(pybind11 CONFIG REQUIRED)
 #     add_subdirectory(${stim_SOURCE_DIR})
 # endif()
 
-# Include directories.
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/weave/_core/include)
-
 # Core source files - utility and code implementation.
 set(WEAVE_CORE_SOURCES
     weave/_core/src/codes/noise_model.cpp
@@ -41,8 +38,10 @@ set(WEAVE_BINDINGS_SOURCES
 
 # Create the Python module.
 pybind11_add_module(_core ${WEAVE_CORE_SOURCES} ${WEAVE_BINDINGS_SOURCES})
-target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/weave/_core/include)
-target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/weave/_core/lib/eigen/Eigen)
+target_include_directories(_core PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/weave/_core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/weave/_core/lib/eigen
+)
 # target_link_libraries(_core PRIVATE libstim)
 
 # Install the module to the Python package directory.

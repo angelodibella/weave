@@ -4,8 +4,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "weave/util/pcm.hpp"
 #include "weave/util/graph.hpp"
+#include "weave/util/pcm.hpp"
 
 namespace py = pybind11;
 
@@ -29,17 +29,34 @@ void bind_graph(py::module& util_module) {
     // Create a submodule for graph utilities.
     auto graph = util_module.def_submodule("graph", "Graph utility functions");
 
-    // Bind the find_edge_crossings function.
-    graph.def("find_edge_crossings", &weave::util::find_edge_crossings, py::arg("pos"), py::arg("edges"),
-              "Find all edge crossings in a graph.\n\n"
-              "Args:\n"
-              "    pos: The positions of the nodes in the graph.\n"
-              "    edges: The edges in the graph.\n"
-              "Returns:\n"
-              "    A set of sets of pairs of edges that cross each other.");
+    // Bind the find_edge_crossings function with custom conversion.
+    // TODO: List instead of sets? It may change other implementations in the HypergraphProductCode class.
+    graph.def(
+        "find_edge_crossings",
+        [](const std::vector<std::pair<float, float>>& pos, const std::vector<std::pair<int, int>>& edges) {
+            auto cpp_result = weave::util::find_edge_crossings(pos, edges);
+            // Convert to Python list of lists for easier handling
+            py::list result;
+            for (const auto& crossing_set : cpp_result) {
+                py::list edge_pair;
+                for (const auto& edge : crossing_set) {
+                    edge_pair.append(edge);
+                }
+                result.append(edge_pair);
+            }
+            return result;
+        },
+        py::arg("pos"), py::arg("edges"),
+        "Find all edge crossings in a graph.\n\n"
+        "Args:\n"
+        "    pos: The positions of the nodes in the graph.\n"
+        "    edges: The edges in the graph.\n"
+        "Returns:\n"
+        "    A list of lists of edges that cross each other.");
 
     // Bind the line_intersection function.
-    graph.def("line_intersection", &weave::util::line_intersection, py::arg("a"), py::arg("b"), py::arg("c"), py::arg("d"),
+    graph.def("line_intersection", &weave::util::line_intersection, py::arg("a"), py::arg("b"), py::arg("c"),
+              py::arg("d"),
               "Find the intersection of two lines.\n\n"
               "Args:\n"
               "    a: The first point of the first line.\n"
@@ -56,7 +73,7 @@ void bind_util(py::module& module) {
 
     // Bind PCM utilities.
     bind_pcm(util);
-    
+
     // Bind graph utilities.
     bind_graph(util);
 }
