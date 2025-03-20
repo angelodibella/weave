@@ -30,31 +30,6 @@ Weave is structured as a clean hybrid C++/Python codebase with Python at the top
 pip install -e .
 ```
 
-## Usage
-
-```python
-import weave
-
-# Create a hypergraph product code
-code = weave.HypergraphProductCode()
-
-# Set up some matrices
-import numpy as np
-pcx = [[1, 0, 1], [0, 1, 1]]
-pcz = [[1, 1, 0], [1, 0, 1]]
-
-# Generate the code
-code.generate(pcx, pcz)
-
-# Get code parameters
-n, k, d = code.get_parameters()
-print(f"Code parameters: [[{n}, {k}, {d}]]")
-
-# Get stabilizers
-stabilizers = code.get_stabilizers()
-print("Stabilizers:", stabilizers)
-```
-
 ## GUI
 
 To launch the GUI:
@@ -76,7 +51,7 @@ python -m weave
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/weave.git
+git clone --recursive https://github.com/yourusername/weave.git
 cd weave
 
 # Install development dependencies
@@ -93,6 +68,37 @@ pytest
 ```
 
 ### Developer's Guide
+
+#### Binding Architecture
+
+Weave uses a modular, granular binding architecture for C++ components:
+
+1. **Header Organization**
+   - Headers in `weave/_core/include/weave/`: Core C++ library headers
+   - Headers in `weave/_core/include/bindings/`: Python binding headers (`.pybind.hpp` files)
+
+2. **Binding Header Responsibilities**
+   - Each `.pybind.hpp` file in `include/bindings/` corresponds to a directory in `include/weave/`
+   - Example: `util.pybind.hpp` defines bindings for code in `weave/util/`
+   - Each header declares multiple granular binding functions, one per component
+   - Headers only declare binding functions, no pybind11 macro usage
+
+3. **Binding Granularity**
+   - Each component has its own dedicated binding function
+   - Example: `bind_pcm` specifically binds the PCM utility functions
+   - A higher-level function (e.g., `bind_util`) aggregates related binding functions
+   - This allows for easier maintenance and better component organization
+
+4. **Binding Source Files**
+   - Implementation in `weave/_core/src/bindings/`
+   - Each `.cpp` file implements all binding functions declared in the corresponding header
+   - Only source files contain pybind11 macros and actual binding code
+   - Binding functions create appropriate submodule hierarchy
+
+5. **Integration**
+   - `weave.pybind.cpp` includes all binding headers and calls their high-level binding functions
+   - All binding code is registered to the main `_core` module
+   - The resulting Python API mirrors the C++ code organization
 
 #### Adding new C++ components
 
@@ -135,60 +141,119 @@ pytest
    } // namespace weave
    ```
 
-3. **Create Python binding**
+3. **Create Python binding header**
    
-   Add binding header:
+   Add binding header (declarations only):
    
    ```cpp
-   // weave/_core/include/bindings/your_component.pybind.hpp
+   // weave/_core/include/bindings/your_module.pybind.hpp
    #pragma once
    
    #include <pybind11/pybind11.h>
-   #include "weave/your_component.hpp"
    
    namespace py = pybind11;
    
    namespace weave {
    namespace bindings {
    
-   inline void bind_your_component(py::module& m) {
-       py::class_<YourComponent>(m, "YourComponent")
+   /**
+    * Create Python bindings for all components in the module.
+    *
+    * @param module The pybind11 module to add the bindings to.
+    */
+   void bind_your_module(py::module& module);
+   
+   /**
+    * Create Python bindings for the YourComponent class.
+    *
+    * @param module The pybind11 module to add the bindings to.
+    */
+   void bind_your_component(py::module& module);
+   
+   /**
+    * Create Python bindings for the AnotherComponent class.
+    *
+    * @param module The pybind11 module to add the bindings to.
+    */
+   void bind_another_component(py::module& module);
+   
+   } // namespace bindings
+   } // namespace weave
+   ```
+
+4. **Implement binding source**
+   
+   Add binding implementation (with actual pybind11 code):
+   
+   ```cpp
+   // weave/_core/src/bindings/your_module.pybind.cpp
+   #include "bindings/your_module.pybind.hpp"
+   
+   #include <pybind11/pybind11.h>
+   #include <pybind11/stl.h>
+   
+   #include "weave/your_component.hpp"
+   #include "weave/another_component.hpp"
+   
+   namespace py = pybind11;
+   
+   namespace weave {
+   namespace bindings {
+   
+   void bind_your_component(py::module& your_module) {
+       py::class_<YourComponent>(your_module, "YourComponent")
            .def(py::init<>())
            .def("do_something", &YourComponent::doSomething);
+   }
+   
+   void bind_another_component(py::module& your_module) {
+       py::class_<AnotherComponent>(your_module, "AnotherComponent")
+           .def(py::init<>())
+           .def("do_other_thing", &AnotherComponent::doOtherThing);
+   }
+   
+   void bind_your_module(py::module& module) {
+       // Create a submodule
+       auto your_module = module.def_submodule("your_module", "Your module description");
+       
+       // Bind individual components
+       bind_your_component(your_module);
+       bind_another_component(your_module);
    }
    
    } // namespace bindings
    } // namespace weave
    ```
 
-4. **Register the binding**
+5. **Register the binding**
    
    Update the main binding file:
    
    ```cpp
    // weave/_core/src/bindings/weave.pybind.cpp
    // Add include
-   #include "bindings/your_component.pybind.hpp"
+   #include "bindings/your_module.pybind.hpp"
    
    PYBIND11_MODULE(_core, m) {
        // ...
-       // Add your new binding
-       weave::bindings::bind_your_component(m);
+       // Add your new module binding
+       weave::bindings::bind_your_module(m);
    }
    ```
 
-5. **Update CMakeLists.txt**
+6. **Update CMakeLists.txt**
    
-   Add your new source file:
+   Add your new source files:
    
    ```cmake
    set(WEAVE_CORE_SOURCES
        # ...
        weave/_core/src/your_component.cpp
+       weave/_core/src/bindings/your_component.pybind.cpp
    )
    ```
 
-6. **Expose in Python**
+7. **Expose in Python**
    
    Update `weave/__init__.py`:
    

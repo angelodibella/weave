@@ -1,13 +1,11 @@
-#include "weave/noise_model.hpp"
+#include "weave/codes/noise_model.hpp"
+
+#include <algorithm>
+#include <numeric>
+#include <stdexcept>
 
 namespace weave {
 
-void NoiseModel::setErrorRate(double rate) {
-    m_errorRate = rate;
-}
+// TODO: Add implementation if needed.
 
-double NoiseModel::getErrorRate() const {
-    return m_errorRate;
-}
-
-} // namespace weave
+}  // namespace weave

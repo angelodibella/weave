@@ -1,121 +1,59 @@
 #include "weave/util/graph.hpp"
 
-// Node and Edge classes can be defined in the implementation file
-// since they're not part of the public interface
+#include <optional>
+#include <set>
+#include <vector>
 
 namespace weave {
 namespace util {
 
-class Node {
-public:
-    Node(int id, const std::string& type) : m_id(id), m_type(type) {}
-    
-    int getId() const { return m_id; }
-    std::string getType() const { return m_type; }
-    void setType(const std::string& type) { m_type = type; }
-    
-private:
-    int m_id;
-    std::string m_type;
-};
+std::set<std::set<std::pair<int, int>>> find_edge_crossings(const std::vector<std::pair<float, float>>& pos,
+                                                            const std::vector<std::pair<int, int>>& edges) {
+    std::set<std::set<std::pair<int, int>>> crossings;
+    for (size_t i = 0; i < edges.size(); i++) {
+        for (size_t j = i + 1; j < edges.size(); j++) {
+            const auto& e1 = edges[i];
+            const auto& e2 = edges[j];
+            if (e1.first == e2.first || e1.first == e2.second || e1.second == e2.first || e1.second == e2.second) {
+                continue;
+            }
 
-class Edge {
-public:
-    Edge(int sourceId, int targetId, const std::string& type = "")
-        : m_sourceId(sourceId), m_targetId(targetId), m_type(type) {}
-    
-    int getSourceId() const { return m_sourceId; }
-    int getTargetId() const { return m_targetId; }
-    std::string getType() const { return m_type; }
-    
-private:
-    int m_sourceId;
-    int m_targetId;
-    std::string m_type;
-};
+            const auto& pos1 = std::make_pair(pos[e1.first], pos[e1.second]);
+            const auto& pos2 = std::make_pair(pos[e2.first], pos[e2.second]);
 
-// Graph implementation
-void Graph::addNode(int id, const std::string& type) {
-    m_nodes[id] = std::make_shared<Node>(id, type);
-}
+            const auto ccw = [](const auto& A, const auto& B, const auto& C) {
+                return (C.second - A.second) * (B.first - A.first) > (B.second - A.second) * (C.first - A.first);
+            };
+            const auto intersect = [&ccw](const auto& A, const auto& B, const auto& C, const auto& D) {
+                return ccw(A, C, D) != ccw(B, C, D) && ccw(A, B, C) != ccw(A, B, D);
+            };
 
-void Graph::removeNode(int id) {
-    m_nodes.erase(id);
-    
-    // Also remove any edges connected to this node
-    auto it = m_edges.begin();
-    while (it != m_edges.end()) {
-        if ((*it)->getSourceId() == id || (*it)->getTargetId() == id) {
-            it = m_edges.erase(it);
-        } else {
-            ++it;
+            if (intersect(pos1.first, pos1.second, pos2.first, pos2.second)) crossings.insert({e1, e2});
         }
     }
+    return crossings;
 }
 
-std::shared_ptr<Node> Graph::getNode(int id) const {
-    auto it = m_nodes.find(id);
-    if (it != m_nodes.end()) {
-        return it->second;
-    }
-    return nullptr;
+std::optional<std::pair<float, float>> line_intersection(const std::pair<float, float>& a,
+                                                         const std::pair<float, float>& b,
+                                                         const std::pair<float, float>& c,
+                                                         const std::pair<float, float>& d) {
+    const auto x1 = a.first;
+    const auto y1 = a.second;
+    const auto x2 = b.first;
+    const auto y2 = b.second;
+    const auto x3 = c.first;
+    const auto y3 = c.second;
+    const auto x4 = d.first;
+    const auto y4 = d.second;
+
+    const auto denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (denom == 0) return std::nullopt;
+
+    const auto x = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom;
+    const auto y = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom;
+    return std::make_pair(x, y);
 }
 
-std::vector<std::shared_ptr<Node>> Graph::getNodes() const {
-    std::vector<std::shared_ptr<Node>> result;
-    for (const auto& pair : m_nodes) {
-        result.push_back(pair.second);
-    }
-    return result;
-}
-
-void Graph::addEdge(int sourceId, int targetId, const std::string& type) {
-    // Ensure both nodes exist
-    if (m_nodes.find(sourceId) == m_nodes.end() || 
-        m_nodes.find(targetId) == m_nodes.end()) {
-        return;
-    }
-    
-    m_edges.push_back(std::make_shared<Edge>(sourceId, targetId, type));
-}
-
-void Graph::removeEdge(int sourceId, int targetId) {
-    auto it = m_edges.begin();
-    while (it != m_edges.end()) {
-        if ((*it)->getSourceId() == sourceId && (*it)->getTargetId() == targetId) {
-            it = m_edges.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-std::vector<std::shared_ptr<Edge>> Graph::getEdges() const {
-    return m_edges;
-}
-
-void Graph::clear() {
-    m_nodes.clear();
-    m_edges.clear();
-}
-
-size_t Graph::nodeCount() const {
-    return m_nodes.size();
-}
-
-size_t Graph::edgeCount() const {
-    return m_edges.size();
-}
-
-std::string Graph::toJson() const {
-    // Placeholder for JSON serialization
-    return "{}";
-}
-
-Graph Graph::fromJson(const std::string& json) {
-    // Placeholder for JSON deserialization
-    return Graph();
-}
-
-} // namespace util
-} // namespace weave
+}  // namespace util
+}  // namespace weave
