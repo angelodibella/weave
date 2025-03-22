@@ -1,10 +1,16 @@
+"""Graph utilities for visualizing and analyzing quantum error correction codes."""
+
+from typing import List, Tuple, Dict, Set, Union, Optional, Any, FrozenSet
 import networkx as nx
 import numpy as np
 from matplotlib import pyplot as plt
 
 
-def compute_layout(graph: nx.Graph, pos_spec: str | list[tuple[float, float]], index_key: str = "index") -> list[
-    tuple[float, float]]:
+def compute_layout(
+    graph: nx.Graph, 
+    pos_spec: Union[str, List[Tuple[float, float]]], 
+    index_key: str = "index"
+) -> List[Tuple[float, float]]:
     """
     Compute node positions for a graph based on a layout specification.
 
@@ -16,7 +22,7 @@ def compute_layout(graph: nx.Graph, pos_spec: str | list[tuple[float, float]], i
     ----------
     graph : nx.Graph
         The graph for which to compute positions.
-    pos_spec : str or list of tuple of float
+    pos_spec : str or List[Tuple[float, float]]
         Layout specification. Supported strings are "random", "spring", "bipartite", and "tripartite".
         If a list, positions are assumed to be provided.
     index_key : str, optional
@@ -24,8 +30,13 @@ def compute_layout(graph: nx.Graph, pos_spec: str | list[tuple[float, float]], i
 
     Returns
     -------
-    list of tuple of float
+    List[Tuple[float, float]]
         A list of positions ordered by the node's index.
+        
+    Raises
+    ------
+    ValueError
+        If an unrecognized layout specification is provided or a node is missing the index_key attribute.
     """
     if isinstance(pos_spec, str):
         if pos_spec in ("random", None):
@@ -57,68 +68,130 @@ def compute_layout(graph: nx.Graph, pos_spec: str | list[tuple[float, float]], i
     return pos_list
 
 
-def find_edge_crossings(pos: list[tuple[float, float]], edges: list[tuple[int, int]]) -> set[
-    frozenset[tuple[int, int]]]:
+def find_edge_crossings(
+    pos: List[Tuple[float, float]], 
+    edges: List[Tuple[int, int]]
+) -> Set[FrozenSet[Tuple[int, int]]]:
     """
     Identify intersections among a set of edges based on node positions.
 
     Parameters
     ----------
-    pos : list of tuple of float
+    pos : List[Tuple[float, float]]
         List of positions, where each position corresponds to a node index.
-    edges : list of tuple of int
+    edges : List[Tuple[int, int]]
         List of edges, each represented as a tuple of two node indices.
 
     Returns
     -------
-    set of frozenset
+    Set[FrozenSet[Tuple[int, int]]]
         A set of frozensets, each containing two edges (as tuples) that cross.
     """
-
-    def ccw(A, B, C):
-        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
-
-    def intersect(A, B, C, D):
-        return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
-
     crossings = set()
+    
     for i in range(len(edges)):
         for j in range(i + 1, len(edges)):
             e1, e2 = edges[i], edges[j]
+            
+            # Skip if edges share an endpoint
             if e1[0] in e2 or e1[1] in e2:
                 continue
+                
+            # Get endpoint positions
             pos1 = (pos[e1[0]], pos[e1[1]])
             pos2 = (pos[e2[0]], pos[e2[1]])
-            if intersect(pos1[0], pos1[1], pos2[0], pos2[1]):
+            
+            # Check if edges intersect
+            if _intersect(pos1[0], pos1[1], pos2[0], pos2[1]):
                 crossings.add(frozenset({e1, e2}))
+                
     return crossings
 
 
-def line_intersection(a: float, b: float, c: float, d: float) -> None | tuple[float]:
+def _ccw(A: Tuple[float, float], B: Tuple[float, float], C: Tuple[float, float]) -> bool:
+    """
+    Check if three points make a counter-clockwise turn.
+    
+    Parameters
+    ----------
+    A, B, C : Tuple[float, float]
+        The points to check.
+        
+    Returns
+    -------
+    bool
+        True if the points make a counter-clockwise turn.
+    """
+    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+
+def _intersect(
+    A: Tuple[float, float], 
+    B: Tuple[float, float], 
+    C: Tuple[float, float], 
+    D: Tuple[float, float]
+) -> bool:
+    """
+    Check if line segments AB and CD intersect.
+    
+    Parameters
+    ----------
+    A, B : Tuple[float, float]
+        The endpoints of the first line segment.
+    C, D : Tuple[float, float]
+        The endpoints of the second line segment.
+        
+    Returns
+    -------
+    bool
+        True if the line segments intersect.
+    """
+    return _ccw(A, C, D) != _ccw(B, C, D) and _ccw(A, B, C) != _ccw(A, B, D)
+
+
+def line_intersection(
+    a: Tuple[float, float], 
+    b: Tuple[float, float], 
+    c: Tuple[float, float], 
+    d: Tuple[float, float]
+) -> Optional[Tuple[float, float]]:
     """
     Compute the intersection point of lines ab and cd.
-    Each parameter is a tuple (x, y) in world coordinates.
-    Returns (x, y) if lines intersect, else None.
+    
+    Parameters
+    ----------
+    a, b : Tuple[float, float]
+        The endpoints of the first line.
+    c, d : Tuple[float, float]
+        The endpoints of the second line.
+        
+    Returns
+    -------
+    Optional[Tuple[float, float]]
+        The coordinates of the intersection point if lines intersect, else None.
     """
     x1, y1 = a
     x2, y2 = b
     x3, y3 = c
     x4, y4 = d
+    
     denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
     if denom == 0:
         return None
+        
     x = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom
     y = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom
+    
     return (x, y)
 
 
 def draw(
-        graph: nx.Graph,
-        pos: list[tuple[float, float]],
-        with_labels: bool = False,
-        crossings: bool = True,
-        connection_rad: float = 0.0,
-        **kwargs,
+    graph: nx.Graph,
+    pos: List[Tuple[float, float]],
+    with_labels: bool = False,
+    crossings: bool = True,
+    connection_rad: float = 0.0,
+    **kwargs,
 ) -> None:
     """
     Draw a Tanner graph with default styling.
@@ -127,7 +200,7 @@ def draw(
     ----------
     graph : nx.Graph
         The graph to be drawn.
-    pos : list of tuple of float
+    pos : List[Tuple[float, float]]
         List of node positions ordered by node index.
     with_labels : bool, optional
         Whether to display node labels (default is False).
@@ -138,17 +211,20 @@ def draw(
     **kwargs
         Additional keyword arguments for node drawing.
     """
-    # Default styles based on node type.
+    # Default styles based on node type
     colors = {"q": "#D3D3D3", "X": "#FFC0CB", "Z": "#ADD8E6"}
     shapes = {"q": "o", "X": "s", "Z": "s"}
     sizes = {"q": 300, "X": 230, "Z": 230}
 
-    # Build a dictionary mapping node to its position.
+    # Build a dictionary mapping node to its position
     layout = {node: pos[graph.nodes[node]["index"]] for node in graph.nodes()}
 
-    # Draw nodes by type.
+    # Draw nodes by type
     for ntype, shape in shapes.items():
         nodes = [node for node, attr in graph.nodes.items() if attr.get("type") == ntype]
+        if not nodes:
+            continue
+            
         nx.draw_networkx_nodes(
             graph,
             layout,
@@ -159,17 +235,21 @@ def draw(
             **kwargs,
         )
 
+    # Draw edges
     nx.draw_networkx_edges(
         graph, layout, width=0.7, arrows=True, connectionstyle=f"arc3,rad={connection_rad}"
     )
+    
+    # Draw labels if requested
     if with_labels:
         labels = {node: node for node in graph.nodes()}
         nx.draw_networkx_labels(graph, layout, labels)
 
+    # Highlight crossings if requested
     if crossings:
-        # Compute edges using the "index" attribute.
         edges = [tuple(graph.nodes[node]["index"] for node in edge) for edge in graph.edges()]
         cross_set = find_edge_crossings(pos, edges)
+        
         for crossing in cross_set:
             e1, e2 = list(crossing)
             pt = line_intersection(pos[e1[0]], pos[e1[1]], pos[e2[0]], pos[e2[1]])
@@ -177,3 +257,77 @@ def draw(
                 plt.scatter(pt[0], pt[1], color="black", s=15, marker="D")
 
     plt.axis("off")
+
+
+def get_node_types(graph: nx.Graph) -> Dict[str, List]:
+    """
+    Group nodes by their types.
+    
+    Parameters
+    ----------
+    graph : nx.Graph
+        The graph to analyze.
+        
+    Returns
+    -------
+    Dict[str, List]
+        A dictionary mapping node types to lists of nodes.
+    """
+    types = {}
+    for node, attrs in graph.nodes.items():
+        node_type = attrs.get("type", "unknown")
+        if node_type not in types:
+            types[node_type] = []
+        types[node_type].append(node)
+    return types
+
+
+def color_by_distance(
+    graph: nx.Graph, 
+    source: Any, 
+    cmap: str = "viridis",
+    node_size: int = 300
+) -> None:
+    """
+    Visualize graph with nodes colored by their distance from a source node.
+    
+    Parameters
+    ----------
+    graph : nx.Graph
+        The graph to visualize.
+    source : Any
+        The source node from which to compute distances.
+    cmap : str, optional
+        The matplotlib colormap to use (default is "viridis").
+    node_size : int, optional
+        The size of nodes (default is 300).
+    """
+    # Compute distances from source
+    distances = nx.shortest_path_length(graph, source=source)
+    max_dist = max(distances.values())
+    
+    # Normalize distances for colormap
+    norm_distances = {node: dist / max_dist for node, dist in distances.items()}
+    
+    # Get positions
+    pos = nx.spring_layout(graph)
+    
+    # Draw the network with nodes colored by distance
+    nodes = nx.draw_networkx_nodes(
+        graph, 
+        pos,
+        node_color=[norm_distances[node] for node in graph.nodes()],
+        cmap=plt.get_cmap(cmap),
+        node_size=node_size
+    )
+    
+    nx.draw_networkx_edges(graph, pos)
+    
+    # Add a colorbar
+    sm = plt.cm.ScalarMappable(cmap=plt.get_cmap(cmap))
+    sm.set_array([])
+    plt.colorbar(sm, label="Normalized distance from source")
+    
+    plt.axis("off")
+    plt.title(f"Distances from node {source}")
+    plt.show()

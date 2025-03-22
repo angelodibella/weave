@@ -1,4 +1,8 @@
+"""Parity-check matrix utilities for classical and quantum error correction."""
+
+from typing import List, Tuple, Union, Optional
 import numpy as np
+from ldpc import mod2
 
 
 def repetition(n: int) -> np.ndarray:
@@ -43,7 +47,7 @@ def hamming(n: int) -> np.ndarray:
         If n is not of the form 2**m - 1.
     """
     m = int(np.ceil(np.log2(n + 1)))
-    if 2 ** m - 1 != n:
+    if 2**m - 1 != n:
         raise ValueError("Invalid n for a Hamming code. Ensure n = 2^m - 1.")
 
     H = np.zeros((m, n), dtype=int)
@@ -54,8 +58,8 @@ def hamming(n: int) -> np.ndarray:
 
 
 def hypergraph_product(
-        H1: np.ndarray, H2: np.ndarray, reordered: bool = True
-) -> tuple[np.ndarray, np.ndarray]:
+    H1: np.ndarray, H2: np.ndarray, reordered: bool = True
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the hypergraph product of two parity-check matrices.
 
@@ -75,7 +79,7 @@ def hypergraph_product(
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray]
+    Tuple[np.ndarray, np.ndarray]
         A tuple (HX, HZ) of binary matrices.
     """
     r1, n1 = H1.shape
@@ -90,28 +94,51 @@ def hypergraph_product(
     HZ = np.append(HZ_left, HZ_right, axis=1)
 
     if reordered:
-        HX_left_split = np.split(HX_left, n1, axis=1)
-        HX_right_split = np.split(HX_right, r1, axis=1)
-        HX_parts = []
-        for i in range(n1):
-            HX_parts.append(HX_left_split[i])
-            if i < r1:
-                HX_parts.append(HX_right_split[i])
-        HX = np.concatenate(HX_parts, axis=1)
-
-        HZ_left_split = np.split(HZ_left, n1, axis=1)
-        HZ_right_split = np.split(HZ_right, r1, axis=1)
-        HZ_parts = []
-        for i in range(n1):
-            HZ_parts.append(HZ_left_split[i])
-            if i < r1:
-                HZ_parts.append(HZ_right_split[i])
-        HZ = np.concatenate(HZ_parts, axis=1)
+        HX = _reorder_matrix(HX, HX_left, HX_right, n1, r1)
+        HZ = _reorder_matrix(HZ, HZ_left, HZ_right, n1, r1)
 
     return HX.astype(int), HZ.astype(int)
 
 
-def to_clist(H: np.ndarray) -> list:
+def _reorder_matrix(
+    full_matrix: np.ndarray,
+    left_part: np.ndarray,
+    right_part: np.ndarray,
+    n1: int,
+    r1: int,
+) -> np.ndarray:
+    """
+    Helper function to reorder matrices by interleaving columns.
+
+    Parameters
+    ----------
+    full_matrix : np.ndarray
+        The original concatenated matrix.
+    left_part : np.ndarray
+        The left part of the matrix to reorder.
+    right_part : np.ndarray
+        The right part of the matrix to reorder.
+    n1 : int
+        First dimension parameter.
+    r1 : int
+        Second dimension parameter.
+
+    Returns
+    -------
+    np.ndarray
+        The reordered matrix.
+    """
+    left_split = np.split(left_part, n1, axis=1)
+    right_split = np.split(right_part, r1, axis=1)
+    parts = []
+    for i in range(n1):
+        parts.append(left_split[i])
+        if i < r1:
+            parts.append(right_split[i])
+    return np.concatenate(parts, axis=1)
+
+
+def to_clist(H: np.ndarray) -> List:
     """
     Convert a parity-check matrix to its classical list (clist) representation.
 
@@ -125,7 +152,7 @@ def to_clist(H: np.ndarray) -> list:
 
     Returns
     -------
-    list
+    List
         The clist representation.
     """
     clist = ["B"] * H.shape[1]
@@ -137,13 +164,13 @@ def to_clist(H: np.ndarray) -> list:
     return clist
 
 
-def to_matrix(clist: list) -> np.ndarray:
+def to_matrix(clist: List) -> np.ndarray:
     """
     Reconstruct a parity-check matrix from its clist representation.
 
     Parameters
     ----------
-    clist : list
+    clist : List
         The classical list representation, with an initial block of "B" tokens followed by
         check sequences introduced by "C".
 
@@ -168,7 +195,7 @@ def to_matrix(clist: list) -> np.ndarray:
     return np.array(rows, dtype=int)
 
 
-def find_pivot_columns(matrix: np.ndarray) -> list[int]:
+def find_pivot_columns(matrix: np.ndarray) -> List[int]:
     """
     Find the pivot columns of a binary matrix using Gaussian elimination over GF(2).
 
@@ -179,25 +206,95 @@ def find_pivot_columns(matrix: np.ndarray) -> list[int]:
 
     Returns
     -------
-    list[int]
+    List[int]
         Indices of the pivot columns.
     """
-    rows, cols = matrix.shape
+    # Create a copy to avoid modifying the original matrix
+    mat_copy = matrix.copy()
+    rows, cols = mat_copy.shape
     pivot_columns = []
     row_index = 0
 
     for col_index in range(cols):
         pivot_found = False
         for i in range(row_index, rows):
-            if matrix[i, col_index] == 1:
+            if mat_copy[i, col_index] == 1:
                 pivot_columns.append(col_index)
                 pivot_found = True
                 if i != row_index:
-                    matrix[[i, row_index]] = matrix[[row_index, i]]
+                    mat_copy[[i, row_index]] = mat_copy[[row_index, i]]
                 for j in range(rows):
-                    if j != row_index and matrix[j, col_index] == 1:
-                        matrix[j] = (matrix[j] + matrix[row_index]) % 2
+                    if j != row_index and mat_copy[j, col_index] == 1:
+                        mat_copy[j] = (mat_copy[j] + mat_copy[row_index]) % 2
                 row_index += 1
                 break
-        # Continue to next column if no pivot is found
+        if row_index >= rows:
+            break
     return pivot_columns
+
+
+def row_reduce(matrix: np.ndarray) -> np.ndarray:
+    """
+    Perform Gaussian elimination over GF(2) to get a row-reduced form.
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix to row-reduce.
+
+    Returns
+    -------
+    np.ndarray
+        The row-reduced form of the matrix.
+    """
+    result = mod2.row_echelon(matrix)[0]
+    return result
+
+
+def nullspace(matrix: np.ndarray) -> np.ndarray:
+    """
+    Compute the nullspace of a binary matrix over GF(2).
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix.
+
+    Returns
+    -------
+    np.ndarray
+        A matrix whose rows form a basis for the nullspace.
+    """
+    return mod2.nullspace(matrix)
+
+
+def distance(H: np.ndarray) -> int:
+    """
+    Compute the minimum distance of a code defined by parity-check matrix H.
+
+    For small codes only, as this is a brute-force computation.
+
+    Parameters
+    ----------
+    H : np.ndarray
+        The parity-check matrix.
+
+    Returns
+    -------
+    int
+        The minimum distance of the code.
+    """
+    n = H.shape[1]
+    ker = nullspace(H)
+
+    if ker.shape[0] == 0:  # Trivial code
+        return float("inf")
+
+    # Compute weights of all non-zero codewords
+    min_weight = float("inf")
+    for codeword in ker:
+        weight = np.sum(codeword)
+        if 0 < weight < min_weight:
+            min_weight = weight
+
+    return min_weight
