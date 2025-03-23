@@ -21,7 +21,8 @@ def repetition(n: int) -> np.ndarray:
     """
     H = np.zeros((n - 1, n), dtype=int)
     np.fill_diagonal(H, 1)
-    H[:, -1] = 1
+    for i in range(n - 1):
+        H[i, i + 1] = 1
     return H
 
 
@@ -57,6 +58,7 @@ def hamming(n: int) -> np.ndarray:
     return H
 
 
+# TODO: Address interleaving.
 def hypergraph_product(
     H1: np.ndarray, H2: np.ndarray, reordered: bool = True
 ) -> Tuple[np.ndarray, np.ndarray]:
