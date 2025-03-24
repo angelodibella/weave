@@ -3,7 +3,7 @@
 import numpy as np
 import stim
 import networkx as nx
-from typing import Optional, Union, List, Tuple, Any
+from typing import Optional, Self, Union, List, Tuple, Any
 
 from .base import NoiseModel, QuantumCode
 from ..util import pcm, graph
@@ -214,7 +214,7 @@ class CSSCode(QuantumCode):
 
         return self.circuit
 
-    def embed(self, pos: Optional[Union[str, List[Tuple[int, int]]]] = None) -> None:
+    def embed(self, pos: Optional[Union[str, List[Tuple[int, int]]]] = None) -> Self:
         self.graph = self._construct_graph()
 
         # Compute node positions using the general layout utility.
@@ -235,6 +235,8 @@ class CSSCode(QuantumCode):
         # Clear the circuit and regenerate it with the new embedding.
         self.circuit = stim.Circuit()
         self.generate()
+        
+        return self
 
     def find_logicals(self) -> Tuple[np.ndarray, np.ndarray]:
         """
