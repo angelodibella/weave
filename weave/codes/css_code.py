@@ -214,7 +214,7 @@ class CSSCode(QuantumCode):
 
         return self.circuit
 
-    def embed(self, pos: str):
+    def embed(self, pos: Optional[Union[str, List[Tuple[int, int]]]] = None) -> None:
         self.graph = self._construct_graph()
 
         # Compute node positions using the general layout utility.
@@ -222,6 +222,8 @@ class CSSCode(QuantumCode):
             self.pos = graph.compute_layout(
                 self.graph, pos or "random", index_key="index"
             )
+        else:
+            self.pos = pos
 
         # Compute crossings using the utility function.
         edges = [
