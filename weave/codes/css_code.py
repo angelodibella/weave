@@ -1,6 +1,7 @@
 """Implementation of CSS (Calderbank-Shor-Steane) quantum error-correcting codes."""
 
 import numpy as np
+import scipy.sparse as sp
 import stim
 import networkx as nx
 from typing import Optional, Self, Union, List, Tuple, Any
@@ -27,7 +28,7 @@ class CSSCode(QuantumCode):
         A Stim circuit to which the code circuit will be appended. If None, a new circuit is created.
     rounds : int
         Number of measurement rounds. Default is 3.
-    noise : NoiseModel
+    noise : NoiseModel, optional
         Noise model for circuit operations. Default is a zero-noise model.
     experiment : str
         Experiment type ("z_memory" or "x_memory"). Default is "z_memory".
@@ -40,10 +41,13 @@ class CSSCode(QuantumCode):
         HX: np.ndarray,
         HZ: np.ndarray,
         rounds: int = 3,
-        noise: NoiseModel = NoiseModel(),
+        noise: Optional[NoiseModel] = None,
         experiment: str = "z_memory",
         logical: Optional[Union[int, List[int]]] = None,
     ) -> None:
+        if noise is None:
+            noise = NoiseModel()
+
         # Verify that HX and HZ satisfy the CSS condition.
         if not np.all(np.mod(np.dot(HX, HZ.T), 2) == 0):
             raise ValueError("CSS condition not satisfied.")
@@ -113,13 +117,14 @@ class CSSCode(QuantumCode):
                 circuit.append("PAULI_CHANNEL_2", [dq, target], self.noise.circuit)
 
         # X-check stabilizer operations.
+        # Uses H-CNOT-...-CNOT-H bracket per check (equivalent to measuring X stabilizers).
         for target, row in zip(self.x_check_qubits, self.HX):
             data_idxs = [self.data_qubits[i] for i, v in enumerate(row) if v]
+            circuit.append("H", [target])
             for dq in data_idxs:
-                circuit.append("H", [target])
                 circuit.append("CNOT", [target, dq])
-                circuit.append("H", [target])
                 circuit.append("PAULI_CHANNEL_2", [dq, target], self.noise.circuit)
+            circuit.append("H", [target])
 
         # Noise for crossing edges.
         for crossing in self.crossings:
@@ -204,10 +209,6 @@ class CSSCode(QuantumCode):
                 self.logical = [self.logical]
             logicals = [logicals[i] for i in self.logical]
 
-        print(f"[{'Z' if self.experiment == 'z_memory' else 'X'} Logical Operators]")
-        print(f"Using {len(logicals)}/{orig_count} logical operators:")
-        print(logicals, "\n")
-
         for i, lq in enumerate(logicals):
             recs = [stim.target_rec(q - len(self.data_qubits)) for q in lq]
             self.circuit.append("OBSERVABLE_INCLUDE", recs, i)
@@ -242,15 +243,25 @@ class CSSCode(QuantumCode):
         """
         Compute logical operators from the parity-check matrices.
 
+        Extracts independent X and Z logical operators and pairs them into
+        a symplectic basis where X_Li anticommutes only with Z_Li.
+
         Returns
         -------
         Tuple[np.ndarray, np.ndarray]
-            (x_logicals, z_logicals) logical operator matrices.
+            (x_logicals, z_logicals) logical operator matrices in symplectic pairing.
         """
 
-        def compute_lz(HX_mat, HZ_mat):
-            ker = pcm.nullspace(HX_mat)
-            basis = pcm.mod2.row_basis(HZ_mat)
+        def _to_dense(mat: np.ndarray) -> np.ndarray:
+            """Convert sparse matrix to dense if needed."""
+            if sp.issparse(mat):
+                return mat.toarray().astype(int)
+            return np.asarray(mat, dtype=int)
+
+        def _extract_logicals(HX_mat, HZ_mat):
+            """Extract independent logical operators from ker(HX) modulo rowspace(HZ)."""
+            ker = _to_dense(pcm.nullspace(HX_mat))
+            basis = _to_dense(pcm.mod2.row_basis(HZ_mat))
             if ker.shape[0] == 0 or basis.shape[0] == 0:
                 return np.zeros((0, HX_mat.shape[1]), dtype=int)
 
@@ -261,9 +272,65 @@ class CSSCode(QuantumCode):
             ]
             return logicals[indices]
 
-        x_logicals = compute_lz(self.HZ, self.HX)
-        z_logicals = compute_lz(self.HX, self.HZ)
+        x_logicals = _extract_logicals(self.HZ, self.HX)
+        z_logicals = _extract_logicals(self.HX, self.HZ)
+
+        # Symplectic Gram-Schmidt: pair X_Li with Z_Li so they anticommute,
+        # and all cross-pairs commute. Required for correct OBSERVABLE_INCLUDE
+        # assignment when k > 1.
+        x_logicals, z_logicals = self._symplectic_gram_schmidt(
+            x_logicals, z_logicals
+        )
+
         return x_logicals, z_logicals
+
+    @staticmethod
+    def _symplectic_gram_schmidt(
+        x_logicals: np.ndarray, z_logicals: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Pair X and Z logical operators into a symplectic basis.
+
+        After this procedure, x[i] anticommutes with z[i] and commutes with z[j]
+        for all j != i (and vice versa).
+
+        Parameters
+        ----------
+        x_logicals : np.ndarray
+            X logical operators, shape (k, n).
+        z_logicals : np.ndarray
+            Z logical operators, shape (k, n).
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray]
+            Symplectically paired (x_logicals, z_logicals).
+        """
+        k = x_logicals.shape[0]
+        if k <= 1:
+            return x_logicals, z_logicals
+
+        x = x_logicals.copy()
+        z = z_logicals.copy()
+
+        for i in range(k):
+            # Find j >= i such that x[i] anticommutes with z[j].
+            for j in range(i, k):
+                if np.dot(x[i], z[j]) % 2 == 1:
+                    if j != i:
+                        z[[i, j]] = z[[j, i]]
+                    break
+
+            # Make all other operators commute with x[i] and z[i].
+            for j in range(k):
+                if j == i:
+                    continue
+                if np.dot(x[j], z[i]) % 2 == 1:
+                    x[j] = (x[j] + x[i]) % 2
+                if np.dot(z[j], x[i]) % 2 == 1:
+                    z[j] = (z[j] + z[i]) % 2
+
+        return x, z
 
     def draw(
         self,

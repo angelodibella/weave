@@ -8,8 +8,11 @@ def test_repetition():
     H = pcm.repetition(4)
     assert H.shape == (3, 4)
 
-    # Check that the last column is all ones.
-    np.testing.assert_array_equal(H[:, -1], np.ones(3, dtype=int))
+    # Each row should have exactly two 1s (adjacent bits).
+    for i in range(H.shape[0]):
+        assert np.sum(H[i]) == 2
+        assert H[i, i] == 1
+        assert H[i, i + 1] == 1
 
 
 def test_hamming_valid():
