@@ -1,6 +1,5 @@
 """Parity-check matrix utilities for classical and quantum error correction."""
 
-from typing import List, Tuple, Union, Optional
 import numpy as np
 
 
@@ -8,7 +7,7 @@ import numpy as np
 # GF(2) Linear Algebra
 # =============================================================================
 
-def row_echelon(matrix: np.ndarray) -> Tuple[np.ndarray, int, np.ndarray, List[int]]:
+def row_echelon(matrix: np.ndarray) -> tuple[np.ndarray, int, np.ndarray, list[int]]:
     """
     Perform Gaussian elimination over GF(2) to get row echelon form.
 
@@ -147,7 +146,7 @@ def row_reduce(matrix: np.ndarray) -> np.ndarray:
     return row_echelon(matrix)[0]
 
 
-def find_pivot_columns(matrix: np.ndarray) -> List[int]:
+def find_pivot_columns(matrix: np.ndarray) -> list[int]:
     """
     Find the pivot columns of a binary matrix using Gaussian elimination over GF(2).
 
@@ -224,7 +223,7 @@ def hamming(n: int) -> np.ndarray:
 # TODO: Address interleaving.
 def hypergraph_product(
     H1: np.ndarray, H2: np.ndarray, reordered: bool = True
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute the hypergraph product of two parity-check matrices.
 
@@ -296,14 +295,15 @@ def _reorder_matrix(
     left_split = np.split(left_part, n1, axis=1)
     right_split = np.split(right_part, r1, axis=1)
     parts = []
-    for i in range(n1):
-        parts.append(left_split[i])
+    for i in range(max(n1, r1)):
+        if i < n1:
+            parts.append(left_split[i])
         if i < r1:
             parts.append(right_split[i])
     return np.concatenate(parts, axis=1)
 
 
-def to_clist(H: np.ndarray) -> List:
+def to_clist(H: np.ndarray) -> list:
     """
     Convert a parity-check matrix to its classical list (clist) representation.
 
@@ -329,7 +329,7 @@ def to_clist(H: np.ndarray) -> List:
     return clist
 
 
-def to_matrix(clist: List) -> np.ndarray:
+def to_matrix(clist: list) -> np.ndarray:
     """
     Reconstruct a parity-check matrix from its clist representation.
 

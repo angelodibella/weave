@@ -1,7 +1,9 @@
 # weave/surface/torus.py
 """Implementation of a flat Torus surface for embedding QEC Tanner graphs."""
 
-from typing import List, Tuple, Any, Optional, Dict, Sequence, Union
+import warnings
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from matplotlib import patches
@@ -12,13 +14,13 @@ from .base import Surface
 
 # Helper function for line clipping (Liang-Barsky algorithm).
 def _liang_barsky_clip(
-    p1: Tuple[float, float],
-    p2: Tuple[float, float],
+    p1: tuple[float, float],
+    p2: tuple[float, float],
     xmin: float,
     ymin: float,
     xmax: float,
     ymax: float,
-) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
     """Clips a line segment p1-p2 to a rectangle [xmin, ymin] x [xmax, ymax]."""
     x1, y1 = p1
     x2, y2 = p2
@@ -74,15 +76,15 @@ class Torus(Surface):
         self,
         Lx: float,
         Ly: float,
-        node_coords: Optional[Dict[int, Tuple[float, float]]] = None,
-        major_radius: Optional[float] = None,
-        minor_radius: Optional[float] = None,
+        node_coords: dict[int, tuple[float, float]] | None = None,
+        major_radius: float | None = None,
+        minor_radius: float | None = None,
     ) -> None:
         if Lx <= 0 or Ly <= 0:
             raise ValueError("Torus dimensions Lx and Ly must be positive.")
         self.Lx = float(Lx)
         self.Ly = float(Ly)
-        self.coords: Dict[int, Tuple[float, float]] = {}
+        self.coords: dict[int, tuple[float, float]] = {}
         if node_coords:
             self.set_intrinsic_coords(node_coords)
 
@@ -91,8 +93,9 @@ class Torus(Surface):
         self.R = major_radius if major_radius is not None else scale_factor * 2.0
         self.r = minor_radius if minor_radius is not None else scale_factor * 0.5
         if self.R <= self.r:
-            print(
-                f"Warning: Torus R={self.R:.2f} <= r={self.r:.2f}. 3D embedding may self-intersect."
+            warnings.warn(
+                f"Torus R={self.R:.2f} <= r={self.r:.2f}. 3D embedding may self-intersect.",
+                stacklevel=2,
             )
 
     def get_intrinsic_coords(self, node_indices: Sequence[int]) -> np.ndarray:
@@ -102,7 +105,7 @@ class Torus(Surface):
             raise ValueError(f"Coordinates not set for node index(es): {missing}")
         return np.array([self.coords[idx] for idx in node_indices])
 
-    def set_intrinsic_coords(self, coords: Dict[int, Tuple[float, float]]) -> None:
+    def set_intrinsic_coords(self, coords: dict[int, tuple[float, float]]) -> None:
         """Sets the (u, v) coordinates, wrapping them into [0, Lx) x [0, Ly)."""
         for idx, (u, v) in coords.items():
             wu = np.fmod(u, self.Lx)
@@ -113,8 +116,8 @@ class Torus(Surface):
             )
 
     def _get_displacement_vector(
-        self, coord1: Tuple[float, float], coord2: Tuple[float, float]
-    ) -> Tuple[float, float]:
+        self, coord1: tuple[float, float], coord2: tuple[float, float]
+    ) -> tuple[float, float]:
         """Calculates the shortest displacement vector (du, dv) on the torus."""
         u1, v1 = coord1
         u2, v2 = coord2
@@ -125,8 +128,8 @@ class Torus(Surface):
         return du, dv
 
     def get_shortest_path(
-        self, coord1: Tuple[float, float], coord2: Tuple[float, float]
-    ) -> Dict[str, Any]:
+        self, coord1: tuple[float, float], coord2: tuple[float, float]
+    ) -> dict[str, Any]:
         """Represents the shortest path (straight line segment in covering space)."""
         u1, v1 = coord1
         du, dv = self._get_displacement_vector(coord1, coord2)
@@ -136,15 +139,15 @@ class Torus(Surface):
             "end_unwrapped": (u1 + du, v1 + dv),
         }
 
-    def path_length(self, path: Dict[str, Any]) -> float:
+    def path_length(self, path: dict[str, Any]) -> float:
         """Calculates the Euclidean length of the shortest path displacement."""
         du = path["end_unwrapped"][0] - path["start"][0]
         dv = path["end_unwrapped"][1] - path["start"][1]
         return np.sqrt(du**2 + dv**2)
 
     def check_intersection(
-        self, path1: Dict[str, Any], path2: Dict[str, Any], return_points: bool = False
-    ) -> Union[bool, List[Tuple[float, float]]]:
+        self, path1: dict[str, Any], path2: dict[str, Any], return_points: bool = False
+    ) -> bool | list[tuple[float, float]]:
         """Checks if two shortest paths intersect on the torus."""
         intersections = []
         p1_s, p1_e_unw = path1["start"], path1["end_unwrapped"]
@@ -181,7 +184,7 @@ class Torus(Surface):
         return intersections if return_points else False
 
     @staticmethod
-    def _segment_intersection_point_2d(p1, q1, p2, q2) -> Optional[Tuple[float, float]]:
+    def _segment_intersection_point_2d(p1, q1, p2, q2) -> tuple[float, float] | None:
         """Find intersection point of 2D segments (p1,q1) and (p2,q2), excluding endpoints."""
         x1, y1 = p1
         x2, y2 = q1
@@ -206,11 +209,11 @@ class Torus(Surface):
             raise ValueError("Input coords must be shape (N, 2) or (2,).")
         return coords.copy()
 
-    def get_boundary_info(self) -> Optional[Dict[str, Any]]:
+    def get_boundary_info(self) -> dict[str, Any] | None:
         """Returns boundary lines and labels for the rectangular projection."""
         return {"type": "rectangle", "xlim": (0.0, self.Lx), "ylim": (0.0, self.Ly)}
 
-    def draw_path_2d(self, ax: Any, path: Dict[str, Any], **kwargs) -> None:
+    def draw_path_2d(self, ax: Any, path: dict[str, Any], **kwargs: Any) -> None:
         """Draws the shortest path on 2D axes, handling torus wrapping via clipping."""
         u1, v1 = path["start"]
         u2_unw, v2_unw = path["end_unwrapped"]
@@ -253,8 +256,8 @@ class Torus(Surface):
         return np.stack([x, y, z], axis=-1)
 
     def get_3d_mesh(
-        self, u_res=60, v_res=40
-    ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        self, u_res: int = 60, v_res: int = 40
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Generates coordinate arrays for plotting the torus mesh in 3D."""
         u = np.linspace(0, self.Lx, u_res)
         v = np.linspace(0, self.Ly, v_res)

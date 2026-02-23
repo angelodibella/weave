@@ -34,7 +34,32 @@ def test_noise_model_list():
 
 
 def test_noise_model_invalid_length():
-    # Test that providing an invalid list length raises an assertion error.
-    with pytest.raises(AssertionError):
-        # Data should have length 3; providing a list of 2 should trigger an error.
+    # Test that providing an invalid list length raises a ValueError.
+    with pytest.raises(ValueError):
         NoiseModel(data=[0.1, 0.1])
+
+
+def test_noise_model_zero():
+    """Default NoiseModel should have all zeros."""
+    nm = NoiseModel()
+    assert all(v == 0.0 for v in nm.data)
+    assert all(v == 0.0 for v in nm.circuit)
+    assert all(v == 0.0 for v in nm.crossing)
+
+
+def test_noise_model_int_input():
+    """Integer noise values should work (not just floats)."""
+    nm = NoiseModel(data=0, circuit=0, crossing=0)
+    assert all(v == 0.0 for v in nm.data)
+
+
+def test_noise_model_invalid_circuit_length():
+    """Circuit noise with wrong length should raise ValueError."""
+    with pytest.raises(ValueError):
+        NoiseModel(circuit=[0.01] * 10)
+
+
+def test_noise_model_invalid_crossing_length():
+    """Crossing noise with wrong length should raise ValueError."""
+    with pytest.raises(ValueError):
+        NoiseModel(crossing=[0.01] * 3)

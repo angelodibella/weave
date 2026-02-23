@@ -2394,6 +2394,11 @@ dependencies = [
     { name = "sympy" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", specifier = ">=3.9.2" },
@@ -2401,11 +2406,13 @@ requires-dist = [
     { name = "notebook", specifier = ">=7.2.2" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "pyside6", specifier = ">=6.8" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.4" },
     { name = "sinter", specifier = ">=1.14.0" },
     { name = "stim", specifier = ">=1.14.0" },
     { name = "stimbposd", specifier = ">=0.0.1" },
     { name = "sympy", specifier = ">=1.13.3" },
 ]
+provides-extras = ["test"]
 
 [[package]]
 name = "webcolors"

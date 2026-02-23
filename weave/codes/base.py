@@ -1,7 +1,6 @@
 """Base classes and abstractions for quantum error correction codes."""
 
 from abc import ABC, abstractmethod
-from typing import List, Union, Tuple, Optional, Any
 
 import numpy as np
 import stim
@@ -39,11 +38,11 @@ class NoiseModel:
 
     def __init__(
         self,
-        data: Union[float, List[float]] = 0.0,
-        z_check: Union[float, List[float]] = 0.0,
-        x_check: Union[float, List[float]] = 0.0,
-        circuit: Union[float, List[float]] = 0.0,
-        crossing: Union[float, List[float]] = 0.0,
+        data: float | list[float] = 0.0,
+        z_check: float | list[float] = 0.0,
+        x_check: float | list[float] = 0.0,
+        circuit: float | list[float] = 0.0,
+        crossing: float | list[float] = 0.0,
     ) -> None:
         self.circuit = self._process_noise(
             circuit, expected=15, name="Circuit", divisor=15
@@ -61,8 +60,8 @@ class NoiseModel:
 
     @staticmethod
     def _process_noise(
-        param: Union[float, List[float]], expected: int, name: str, divisor: float
-    ) -> List[float]:
+        param: float | list[float], expected: int, name: str, divisor: float
+    ) -> list[float]:
         """
         Process a noise parameter by ensuring it is a list of the expected length.
 
@@ -84,13 +83,13 @@ class NoiseModel:
         list of float
             The processed noise parameter.
         """
-        if np.issubdtype(type(param), np.number):
+        if isinstance(param, (int, float)):
             return [param / divisor for _ in range(expected)]
-        else:
-            assert (
-                len(param) == expected
-            ), f"{name} noise takes {expected} parameters, given {len(param)}."
-            return param
+        if len(param) != expected:
+            raise ValueError(
+                f"{name} noise takes {expected} parameters, given {len(param)}."
+            )
+        return list(param)
 
 
 class ClassicalCode:

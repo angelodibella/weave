@@ -135,3 +135,52 @@ def test_nullspace_and_rank_sum():
         rank = pcm.row_echelon(H)[1]
         nullity = pcm.nullspace(H).shape[0]
         assert rank + nullity == n, f"rank({rank}) + nullity({nullity}) != n({n})"
+
+
+# ---- Distance tests ----
+
+def test_distance_repetition():
+    """Repetition code of length n has distance n."""
+    H = pcm.repetition(5)
+    assert pcm.distance(H) == 5
+
+
+def test_distance_hamming():
+    """Hamming(7,4,3) code has distance 3."""
+    H = pcm.hamming(7)
+    assert pcm.distance(H) == 3
+
+
+# ---- Hypergraph product with asymmetric inputs ----
+
+def test_hypergraph_product_asymmetric():
+    """Test HP code where r1 > n1 (more checks than bits in H1.T)."""
+    H1 = pcm.repetition(3)  # (2, 3)
+    H2 = pcm.hamming(7)     # (3, 7)
+    HX, HZ = pcm.hypergraph_product(H1, H2, reordered=True)
+    # CSS condition must hold.
+    assert np.all(np.mod(HX @ HZ.T, 2) == 0)
+
+
+def test_hypergraph_product_reordered_preserves_css():
+    """Both reordered and non-reordered should satisfy CSS condition."""
+    H1 = pcm.repetition(4)
+    H2 = pcm.repetition(3)
+    for reordered in (True, False):
+        HX, HZ = pcm.hypergraph_product(H1, H2, reordered=reordered)
+        assert np.all(np.mod(HX @ HZ.T, 2) == 0)
+
+
+# ---- Row-reduce and find_pivot_columns convenience ----
+
+def test_row_reduce():
+    """row_reduce should return reduced form."""
+    M = np.array([[1, 1, 0], [0, 1, 1], [1, 0, 1]], dtype=int)
+    reduced = pcm.row_reduce(M)
+    assert reduced.shape == M.shape
+
+
+def test_find_pivot_columns():
+    """find_pivot_columns should return correct pivots for identity."""
+    I = np.eye(4, dtype=int)
+    assert pcm.find_pivot_columns(I) == [0, 1, 2, 3]

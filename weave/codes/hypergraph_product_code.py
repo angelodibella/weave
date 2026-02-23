@@ -1,7 +1,6 @@
 """Implementation of hypergraph product codes."""
 
 import numpy as np
-from typing import Optional, Union, List, Tuple
 
 from .base import NoiseModel
 from .css_code import CSSCode
@@ -37,9 +36,9 @@ class HypergraphProductCode(CSSCode):
         H1: np.ndarray,
         H2: np.ndarray,
         rounds: int = 3,
-        noise: Optional[NoiseModel] = None,
+        noise: NoiseModel | None = None,
         experiment: str = "z_memory",
-        logical: Optional[Union[int, List[int]]] = None,
+        logical: int | list[int] | None = None,
     ) -> None:
         self.H1: np.ndarray = H1
         self.H2: np.ndarray = H2
