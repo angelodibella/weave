@@ -3,7 +3,8 @@ import math
 from collections import deque
 from typing import Any
 
-from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel, QFileDialog
+import numpy as np
+from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel, QFileDialog, QMessageBox
 from PySide6.QtGui import QPainter, QPen, QColor, QMouseEvent, QKeyEvent, QWheelEvent, QRadialGradient, QIcon, QPixmap, \
     QLinearGradient, QBrush, QAction, QPainterPath
 from PySide6.QtCore import Qt, QPointF, QRectF, QPropertyAnimation, QEasingCurve, Property
@@ -364,6 +365,13 @@ class Canvas(QWidget):
         # Add separator.
         self._hamburger_menu.addSeparator()
 
+        # Simulation and export actions.
+        self._hamburger_menu.addAction("Simulate...", self._run_simulation)
+        self._hamburger_menu.addAction("Export Code...", self._export_code)
+
+        # Add separator.
+        self._hamburger_menu.addSeparator()
+
         # Add crossing number display.
         crossing_widget = QWidget()
         crossing_layout = QHBoxLayout(crossing_widget)
@@ -708,7 +716,8 @@ class Canvas(QWidget):
 
         if node:
             menu.addSeparator()
-            menu.addAction("Save Code as CSV", lambda: print("Save functionality not implemented yet."))
+            menu.addAction("Export Code...", self._export_code)
+            menu.addAction("Simulate...", self._run_simulation)
 
         menu.exec(event.globalPos())
         self.update()
@@ -1883,6 +1892,245 @@ class Canvas(QWidget):
         # Remove graphs marked for removal
         for graph in graphs_to_remove:
             self.graphs.remove(graph)
+
+        # Update crossing count in hamburger menu if open.
+        self._update_crossing_display()
+
+    # ------------------------------------------------------------
+    # CSS Code Bridge
+    # ------------------------------------------------------------
+
+    def _validate_quantum_graph(self):
+        """
+        Partition canvas nodes into qubit/Z/X buckets and validate.
+
+        Returns
+        -------
+        tuple
+            (qubit_nodes, z_nodes, x_nodes, quantum_edges) where nodes are
+            sorted by id for deterministic ordering.
+
+        Raises
+        ------
+        ValueError
+            If the canvas lacks the necessary quantum node types.
+        """
+        quantum_types = {"qubit", "Z_stabilizer", "X_stabilizer"}
+        qubit_nodes = sorted(
+            [n for n in self.nodes if n["type"] == "qubit"], key=lambda n: n["id"]
+        )
+        z_nodes = sorted(
+            [n for n in self.nodes if n["type"] == "Z_stabilizer"], key=lambda n: n["id"]
+        )
+        x_nodes = sorted(
+            [n for n in self.nodes if n["type"] == "X_stabilizer"], key=lambda n: n["id"]
+        )
+
+        if not qubit_nodes:
+            raise ValueError("Canvas has no qubit nodes.")
+        if not z_nodes and not x_nodes:
+            raise ValueError("Canvas has no stabilizer nodes (need at least Z or X).")
+
+        # Filter edges to quantum-only.
+        quantum_ids = {n["id"] for n in qubit_nodes + z_nodes + x_nodes}
+        quantum_edges = [
+            e for e in self.edges
+            if e["source"] in quantum_ids and e["target"] in quantum_ids
+        ]
+
+        return qubit_nodes, z_nodes, x_nodes, quantum_edges
+
+    def to_css_code(self):
+        """
+        Extract a CSSCode from the current canvas state.
+
+        Returns
+        -------
+        CSSCode
+            A CSSCode instance with positions from the canvas embedding.
+
+        Raises
+        ------
+        ValueError
+            If the canvas doesn't contain a valid quantum code graph.
+        """
+        from ..codes.css_code import CSSCode
+
+        qubit_nodes, z_nodes, x_nodes, quantum_edges = self._validate_quantum_graph()
+
+        if not z_nodes:
+            raise ValueError("Canvas has no Z-stabilizer nodes; cannot build a CSS code.")
+        if not x_nodes:
+            raise ValueError("Canvas has no X-stabilizer nodes; cannot build a CSS code.")
+
+        # Build ID→index mappings.
+        qubit_id_to_col = {n["id"]: i for i, n in enumerate(qubit_nodes)}
+        z_id_to_row = {n["id"]: i for i, n in enumerate(z_nodes)}
+        x_id_to_row = {n["id"]: i for i, n in enumerate(x_nodes)}
+
+        num_data = len(qubit_nodes)
+        num_z = len(z_nodes)
+        num_x = len(x_nodes)
+
+        HZ = np.zeros((num_z, num_data), dtype=int)
+        HX = np.zeros((num_x, num_data), dtype=int)
+
+        for edge in quantum_edges:
+            src_id, tgt_id = edge["source"], edge["target"]
+
+            # Determine which is the qubit and which is the stabilizer.
+            if src_id in qubit_id_to_col and tgt_id in z_id_to_row:
+                HZ[z_id_to_row[tgt_id], qubit_id_to_col[src_id]] = 1
+            elif tgt_id in qubit_id_to_col and src_id in z_id_to_row:
+                HZ[z_id_to_row[src_id], qubit_id_to_col[tgt_id]] = 1
+            elif src_id in qubit_id_to_col and tgt_id in x_id_to_row:
+                HX[x_id_to_row[tgt_id], qubit_id_to_col[src_id]] = 1
+            elif tgt_id in qubit_id_to_col and src_id in x_id_to_row:
+                HX[x_id_to_row[src_id], qubit_id_to_col[tgt_id]] = 1
+
+        # Build pos list matching CSSCode index layout:
+        # [data_0..data_n, z_0..z_mZ, x_0..x_mX]
+        pos_list = (
+            [n["pos"] for n in qubit_nodes]
+            + [n["pos"] for n in z_nodes]
+            + [n["pos"] for n in x_nodes]
+        )
+
+        code = CSSCode(HX=HX, HZ=HZ)
+        code.embed(pos=pos_list)
+        return code
+
+    def from_css_code(self, code, layout="spring"):
+        """
+        Populate the canvas from a CSSCode instance.
+
+        Parameters
+        ----------
+        code : CSSCode
+            The code to load.
+        layout : str
+            Layout algorithm if code has no positions. Default is "spring".
+        """
+        # Ensure code has positions.
+        if code.pos is None:
+            code.embed(layout)
+
+        # Clear canvas state.
+        self.nodes = []
+        self.edges = []
+        self.graphs = []
+
+        num_data = len(code.data_qubits)
+        num_z = len(code.z_check_qubits)
+
+        # Scale factor: map code positions to canvas-friendly coordinates.
+        # Find bounding box of code positions and scale to ~500px range.
+        all_pos = code.pos
+        xs = [p[0] for p in all_pos]
+        ys = [p[1] for p in all_pos]
+        span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+        scale = 400.0 / span
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+
+        def scaled(p):
+            return ((p[0] - cx) * scale, (p[1] - cy) * scale)
+
+        node_id = 0
+
+        # Data qubits: indices 0..num_data-1
+        for i in code.data_qubits:
+            self.nodes.append({
+                "id": node_id,
+                "pos": scaled(all_pos[i]),
+                "type": "qubit",
+                "selected": False,
+            })
+            node_id += 1
+
+        # Z-check qubits
+        for i in code.z_check_qubits:
+            self.nodes.append({
+                "id": node_id,
+                "pos": scaled(all_pos[i]),
+                "type": "Z_stabilizer",
+                "selected": False,
+            })
+            node_id += 1
+
+        # X-check qubits
+        for i in code.x_check_qubits:
+            self.nodes.append({
+                "id": node_id,
+                "pos": scaled(all_pos[i]),
+                "type": "X_stabilizer",
+                "selected": False,
+            })
+            node_id += 1
+
+        # Canvas node IDs: data = 0..num_data-1, Z = num_data..num_data+num_z-1,
+        # X = num_data+num_z..
+        # Reconstruct edges from HZ.
+        for row_idx in range(code.HZ.shape[0]):
+            for col_idx in range(code.HZ.shape[1]):
+                if code.HZ[row_idx, col_idx]:
+                    self.edges.append({
+                        "source": col_idx,              # data qubit canvas id
+                        "target": num_data + row_idx,   # Z stabilizer canvas id
+                        "selected": False,
+                    })
+
+        # Reconstruct edges from HX.
+        for row_idx in range(code.HX.shape[0]):
+            for col_idx in range(code.HX.shape[1]):
+                if code.HX[row_idx, col_idx]:
+                    self.edges.append({
+                        "source": col_idx,                      # data qubit canvas id
+                        "target": num_data + num_z + row_idx,   # X stabilizer canvas id
+                        "selected": False,
+                    })
+
+        # Center the viewport.
+        self._view_offset = QPointF(self.width() / 2, self.height() / 2)
+        self._zoom = 1.0
+        self.update()
+
+    def _export_code(self):
+        """Export the quantum code from the canvas to a CSV file."""
+        try:
+            code = self.to_css_code()
+        except ValueError as e:
+            QMessageBox.warning(self, "Export Error", str(e))
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Code", "", "CSV Files (*.csv)"
+        )
+        if not file_path:
+            return
+        if not file_path.endswith(".csv"):
+            file_path += ".csv"
+
+        # Write HX and HZ matrices.
+        with open(file_path, "w") as f:
+            f.write("# HZ\n")
+            for row in code.HZ:
+                f.write(",".join(str(v) for v in row) + "\n")
+            f.write("# HX\n")
+            for row in code.HX:
+                f.write(",".join(str(v) for v in row) + "\n")
+
+    def _run_simulation(self):
+        """Open the simulation dialog for the current canvas code."""
+        try:
+            code = self.to_css_code()
+        except ValueError as e:
+            QMessageBox.warning(self, "Simulation Error", str(e))
+            return
+
+        from .simulation import SimulationDialog
+        dialog = SimulationDialog(code, self)
+        dialog.exec()
 
     def _save_canvas(self):
         file_path, _ = QFileDialog.getSaveFileName(
