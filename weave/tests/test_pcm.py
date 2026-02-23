@@ -59,3 +59,79 @@ def test_to_matrix_and_to_clist():
     clist = pcm.to_clist(H)
     H_reconstructed = pcm.to_matrix(clist)
     np.testing.assert_array_equal(H, H_reconstructed)
+
+
+# ---- GF(2) linear algebra tests ----
+
+def test_row_echelon_identity():
+    I = np.eye(3, dtype=int)
+    reduced, rank, _, pivots = pcm.row_echelon(I)
+    assert rank == 3
+    assert pivots == [0, 1, 2]
+    np.testing.assert_array_equal(reduced, I)
+
+
+def test_row_echelon_rank_deficient():
+    # Row 2 = Row 0 + Row 1 over GF(2)
+    M = np.array([[1, 1, 0], [0, 1, 1], [1, 0, 1]], dtype=int)
+    reduced, rank, _, pivots = pcm.row_echelon(M)
+    assert rank == 2
+    assert len(pivots) == 2
+
+
+def test_row_echelon_transform():
+    H = pcm.hamming(7)
+    reduced, rank, transform, pivots = pcm.row_echelon(H)
+    # transform @ H should equal reduced (mod 2)
+    np.testing.assert_array_equal((transform @ H) % 2, reduced)
+
+
+def test_nullspace_basic():
+    # Repetition code: nullspace should be the all-ones vector.
+    H = pcm.repetition(4)
+    ker = pcm.nullspace(H)
+    assert ker.shape[0] == 1  # k = n - rank = 4 - 3 = 1
+    # Verify it's actually in the nullspace.
+    assert np.all(H @ ker[0] % 2 == 0)
+
+
+def test_nullspace_hamming():
+    H = pcm.hamming(7)
+    ker = pcm.nullspace(H)
+    # Hamming(7,4): nullspace dimension = 7 - 3 = 4
+    assert ker.shape[0] == 4
+    # Every nullspace vector should satisfy H @ v = 0 mod 2.
+    for v in ker:
+        assert np.all(H @ v % 2 == 0)
+
+
+def test_nullspace_full_rank():
+    # Full-rank square matrix should have empty nullspace.
+    M = np.eye(5, dtype=int)
+    ker = pcm.nullspace(M)
+    assert ker.shape[0] == 0
+
+
+def test_row_basis():
+    H = pcm.hamming(7)
+    basis = pcm.row_basis(H)
+    assert basis.shape[0] == 3  # rank of Hamming(7) is 3
+    # Basis rows should be independent.
+    assert np.linalg.matrix_rank(basis.astype(float)) == 3
+
+
+def test_row_basis_with_dependent_rows():
+    # Add a dependent row.
+    H = pcm.repetition(3)  # 2x3
+    H_ext = np.vstack([H, (H[0] + H[1]) % 2])  # 3x3, rank still 2
+    basis = pcm.row_basis(H_ext)
+    assert basis.shape[0] == 2
+
+
+def test_nullspace_and_rank_sum():
+    """rank + nullity = n for any binary matrix."""
+    for H in [pcm.repetition(5), pcm.hamming(7), pcm.hamming(15)]:
+        n = H.shape[1]
+        rank = pcm.row_echelon(H)[1]
+        nullity = pcm.nullspace(H).shape[0]
+        assert rank + nullity == n, f"rank({rank}) + nullity({nullity}) != n({n})"

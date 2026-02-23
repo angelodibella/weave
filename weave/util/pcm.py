@@ -2,8 +2,171 @@
 
 from typing import List, Tuple, Union, Optional
 import numpy as np
-from ldpc import mod2
 
+
+# =============================================================================
+# GF(2) Linear Algebra
+# =============================================================================
+
+def row_echelon(matrix: np.ndarray) -> Tuple[np.ndarray, int, np.ndarray, List[int]]:
+    """
+    Perform Gaussian elimination over GF(2) to get row echelon form.
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix (elements 0 or 1).
+
+    Returns
+    -------
+    Tuple[np.ndarray, int, np.ndarray, List[int]]
+        (reduced_matrix, rank, transformation_matrix, pivot_columns).
+        - reduced_matrix: Row echelon form of the input.
+        - rank: The rank of the matrix.
+        - transformation_matrix: The row operations applied (M such that M @ matrix = reduced).
+        - pivot_columns: Indices of the pivot columns.
+    """
+    mat = np.array(matrix, dtype=int) % 2
+    rows, cols = mat.shape
+    transform = np.eye(rows, dtype=int)
+    pivots = []
+    row_idx = 0
+
+    for col in range(cols):
+        # Find pivot in this column.
+        pivot = None
+        for r in range(row_idx, rows):
+            if mat[r, col] == 1:
+                pivot = r
+                break
+        if pivot is None:
+            continue
+
+        pivots.append(col)
+
+        # Swap rows.
+        if pivot != row_idx:
+            mat[[row_idx, pivot]] = mat[[pivot, row_idx]]
+            transform[[row_idx, pivot]] = transform[[pivot, row_idx]]
+
+        # Eliminate all other 1s in this column.
+        for r in range(rows):
+            if r != row_idx and mat[r, col] == 1:
+                mat[r] = (mat[r] + mat[row_idx]) % 2
+                transform[r] = (transform[r] + transform[row_idx]) % 2
+
+        row_idx += 1
+
+    return mat, len(pivots), transform, pivots
+
+
+def row_basis(matrix: np.ndarray) -> np.ndarray:
+    """
+    Compute a row basis of a binary matrix over GF(2).
+
+    Returns the independent rows from the row echelon form.
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix.
+
+    Returns
+    -------
+    np.ndarray
+        A matrix whose rows form a basis for the row space.
+    """
+    reduced, rank, _, _ = row_echelon(matrix)
+    return reduced[:rank].copy()
+
+
+def nullspace(matrix: np.ndarray) -> np.ndarray:
+    """
+    Compute the nullspace of a binary matrix over GF(2).
+
+    Finds all vectors x such that matrix @ x = 0 (mod 2).
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix of shape (m, n).
+
+    Returns
+    -------
+    np.ndarray
+        A matrix of shape (k, n) whose rows form a basis for the nullspace,
+        where k = n - rank(matrix).
+    """
+    mat = np.array(matrix, dtype=int) % 2
+    m, n = mat.shape
+
+    # Augment with identity on the right: [matrix | I_n] transposed approach.
+    # We work with the transpose and find the left nullspace, then transpose back.
+    # Equivalently: row-reduce [matrix; I_n]^T and extract kernel vectors.
+
+    # Standard approach: row-reduce matrix, then read off nullspace from free columns.
+    reduced, rank, _, pivots = row_echelon(mat)
+
+    if rank == n:
+        return np.zeros((0, n), dtype=int)
+
+    # Identify free (non-pivot) columns.
+    pivot_set = set(pivots)
+    free_cols = [c for c in range(n) if c not in pivot_set]
+
+    # Build nullspace vectors: for each free column, construct a vector.
+    null_vectors = []
+    for fc in free_cols:
+        vec = np.zeros(n, dtype=int)
+        vec[fc] = 1
+        # For each pivot column, determine the value from the reduced matrix.
+        for i, pc in enumerate(pivots):
+            vec[pc] = reduced[i, fc]
+        null_vectors.append(vec)
+
+    if not null_vectors:
+        return np.zeros((0, n), dtype=int)
+
+    return np.array(null_vectors, dtype=int)
+
+
+def row_reduce(matrix: np.ndarray) -> np.ndarray:
+    """
+    Perform Gaussian elimination over GF(2) to get a row-reduced form.
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix to row-reduce.
+
+    Returns
+    -------
+    np.ndarray
+        The row-reduced form of the matrix.
+    """
+    return row_echelon(matrix)[0]
+
+
+def find_pivot_columns(matrix: np.ndarray) -> List[int]:
+    """
+    Find the pivot columns of a binary matrix using Gaussian elimination over GF(2).
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        A binary matrix (elements 0 or 1).
+
+    Returns
+    -------
+    List[int]
+        Indices of the pivot columns.
+    """
+    return row_echelon(matrix)[3]
+
+
+# =============================================================================
+# Code Constructions
+# =============================================================================
 
 def repetition(n: int) -> np.ndarray:
     """
@@ -195,79 +358,6 @@ def to_matrix(clist: List) -> np.ndarray:
         else:
             i += 1
     return np.array(rows, dtype=int)
-
-
-def find_pivot_columns(matrix: np.ndarray) -> List[int]:
-    """
-    Find the pivot columns of a binary matrix using Gaussian elimination over GF(2).
-
-    Parameters
-    ----------
-    matrix : np.ndarray
-        A binary matrix (elements 0 or 1).
-
-    Returns
-    -------
-    List[int]
-        Indices of the pivot columns.
-    """
-    # Create a copy to avoid modifying the original matrix
-    mat_copy = matrix.copy()
-    rows, cols = mat_copy.shape
-    pivot_columns = []
-    row_index = 0
-
-    for col_index in range(cols):
-        pivot_found = False
-        for i in range(row_index, rows):
-            if mat_copy[i, col_index] == 1:
-                pivot_columns.append(col_index)
-                pivot_found = True
-                if i != row_index:
-                    mat_copy[[i, row_index]] = mat_copy[[row_index, i]]
-                for j in range(rows):
-                    if j != row_index and mat_copy[j, col_index] == 1:
-                        mat_copy[j] = (mat_copy[j] + mat_copy[row_index]) % 2
-                row_index += 1
-                break
-        if row_index >= rows:
-            break
-    return pivot_columns
-
-
-def row_reduce(matrix: np.ndarray) -> np.ndarray:
-    """
-    Perform Gaussian elimination over GF(2) to get a row-reduced form.
-
-    Parameters
-    ----------
-    matrix : np.ndarray
-        A binary matrix to row-reduce.
-
-    Returns
-    -------
-    np.ndarray
-        The row-reduced form of the matrix.
-    """
-    result = mod2.row_echelon(matrix)[0]
-    return result
-
-
-def nullspace(matrix: np.ndarray) -> np.ndarray:
-    """
-    Compute the nullspace of a binary matrix over GF(2).
-
-    Parameters
-    ----------
-    matrix : np.ndarray
-        A binary matrix.
-
-    Returns
-    -------
-    np.ndarray
-        A matrix whose rows form a basis for the nullspace.
-    """
-    return mod2.nullspace(matrix)
 
 
 def distance(H: np.ndarray) -> int:

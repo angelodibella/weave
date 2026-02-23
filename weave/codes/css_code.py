@@ -1,7 +1,6 @@
 """Implementation of CSS (Calderbank-Shor-Steane) quantum error-correcting codes."""
 
 import numpy as np
-import scipy.sparse as sp
 import stim
 import networkx as nx
 from typing import Optional, Self, Union, List, Tuple, Any
@@ -252,21 +251,15 @@ class CSSCode(QuantumCode):
             (x_logicals, z_logicals) logical operator matrices in symplectic pairing.
         """
 
-        def _to_dense(mat: np.ndarray) -> np.ndarray:
-            """Convert sparse matrix to dense if needed."""
-            if sp.issparse(mat):
-                return mat.toarray().astype(int)
-            return np.asarray(mat, dtype=int)
-
         def _extract_logicals(HX_mat, HZ_mat):
             """Extract independent logical operators from ker(HX) modulo rowspace(HZ)."""
-            ker = _to_dense(pcm.nullspace(HX_mat))
-            basis = _to_dense(pcm.mod2.row_basis(HZ_mat))
+            ker = pcm.nullspace(HX_mat)
+            basis = pcm.row_basis(HZ_mat)
             if ker.shape[0] == 0 or basis.shape[0] == 0:
                 return np.zeros((0, HX_mat.shape[1]), dtype=int)
 
             logicals = np.vstack([basis, ker])
-            pivots = pcm.mod2.row_echelon(logicals.T)[3]
+            pivots = pcm.row_echelon(logicals.T)[3]
             indices = [
                 i for i in range(basis.shape[0], logicals.shape[0]) if i in pivots
             ]
