@@ -8,27 +8,21 @@ This roadmap organizes the development of Weave around three auditing perspectiv
 
 The highest priority. Every circuit Weave generates must faithfully implement the intended QEC protocol.
 
-### Stabilizer Measurement Circuit
+### Completed (Feb 2026)
 
-- **X-stabilizer gate sequence**: `CSSCode.generate()` currently implements X-checks as `H → CNOT(check, data) → H` per data qubit. Verify this is equivalent to measuring the X-type stabilizer generators (it should be, but the Hadamards should bracket the *entire* CNOT fan-out for a given check, not each individual CNOT — the current per-CNOT wrapping is physically incorrect if multiple data qubits participate in one X-check, since intermediate Hadamards would interfere).
-- **CNOT ordering and parallelism**: The current circuit applies CNOTs sequentially within each check. For HP codes the gate ordering can introduce hook errors that change the effective distance. Investigate whether a specific CNOT scheduling (e.g., the "greedy" or "layer-by-layer" approach) is needed to preserve distance.
-- **Initialization and measurement bases**: Verify that `z_memory` initializes in |0⟩ and measures in Z, while `x_memory` initializes in |+⟩ and measures in X. The current code does `R` vs `RX` and `M` vs `MX` — confirm these Stim instructions match the intended bases.
+- ~~**X-stabilizer gate sequence**~~: Verified algebraically correct (H·H = I cancels between consecutive CNOTs). Optimized from per-CNOT `H-CNOT-H` wrapping to single `H-CNOT-...-CNOT-H` bracket per check.
+- ~~**Initialization and measurement bases**~~: Verified `R`/`M` for z_memory and `RX`/`MX` for x_memory match the intended bases.
+- ~~**Detector record indexing**~~: All `stim.target_rec` offsets audited and verified correct for both experiments — first-round, comparison, and final detectors.
+- ~~**`OBSERVABLE_INCLUDE` targets**~~: Fixed critical bug where logical operators were not in a symplectic basis for k > 1 codes. Added symplectic Gram-Schmidt pairing.
+- ~~**`find_logicals()` sparse matrix crash**~~: Fixed incompatibility with ldpc 2.x sparse returns.
+- ~~**Crossing noise**~~: Verified that qubit pairs in each crossing correctly correspond to Tanner graph edge endpoints.
+- ~~**Circuit noise placement**~~: Verified that post-CNOT `PAULI_CHANNEL_2` matches standard Stim conventions.
 
-### Detector and Observable Correctness
+### Remaining
 
-- **Detector record indexing**: The first-round detectors, mid-round detectors, and final-round detectors each use different `stim.target_rec` offset calculations. Audit these carefully — off-by-one errors here silently produce wrong decoding graphs without raising exceptions.
-- **Final-round detectors iterate in reverse** (`HZ[-1-k]`, `HX[-1-k]`) — verify this matches the measurement record ordering.
-- **`OBSERVABLE_INCLUDE` targets**: Logical operators are extracted via `find_logicals()` which uses GF(2) linear algebra from `ldpc.mod2`. Verify that the returned representatives are valid logical operators (i.e., they commute with all stabilizers but are not themselves stabilizers).
-
-### Noise Model Physicality
-
-- **Crossing noise**: Applied as `PAULI_CHANNEL_2` on pairs of qubits whose Tanner graph edges cross. Document the physical justification — this models correlated Pauli noise from qubit cross-talk during parallel gate execution. Verify that the qubit pairs in each crossing are correct (the current code uses edge endpoint indices).
-- **Circuit noise placement**: Two-qubit `PAULI_CHANNEL_2` noise is applied *after* each CNOT. Verify this matches the convention used by standard Stim circuit noise models (before vs. after matters for error propagation).
-- **Single-qubit noise timing**: `PAULI_CHANNEL_1` on data, Z-check, and X-check qubits is applied once per round after all gates. Consider whether idle noise should also be applied during time steps when a qubit is not involved in a gate.
-
-### Logical Operator Extraction
-
-- **`find_logicals()`**: Uses `nullspace(HX)` to get the kernel, then `row_basis(HZ)` to get the stabilizer span, stacks them, and extracts independent rows via pivot selection. Verify this correctly produces `k` independent logical Z (resp. X) operators. Edge case: codes with `k = 0` should be handled gracefully.
+- **TICK markers**: The circuit does not use Stim `TICK` instructions to delineate time steps. Without TICKs, Stim cannot distinguish parallel from sequential gates, which affects error analysis, circuit visualization, and the detector error model structure. Adding TICKs requires defining a gate scheduling strategy.
+- **CNOT scheduling**: The current circuit applies all Z-check CNOTs sequentially, then all X-check CNOTs sequentially. For HP codes, gate ordering can introduce hook errors that reduce the effective distance. Investigate layer-by-layer or greedy scheduling to parallelize gates while preserving code distance.
+- **Idle noise**: Qubits not participating in a gate during a given time step should still experience decoherence (`DEPOLARIZE1` or `PAULI_CHANNEL_1`). Currently, single-qubit noise is applied once per round after all gates, regardless of how many time steps a qubit was idle. Requires TICK-based scheduling first.
 
 ---
 
