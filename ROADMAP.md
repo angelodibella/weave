@@ -66,6 +66,11 @@ The treatment of Tanner graph edge crossings as a source of correlated noise is 
 - **Crossing-aware decoding**: Feed crossing information into the decoder's error model so that belief propagation or MWPM can account for correlated errors.
 - **Embedding optimization**: Implement heuristics (e.g., simulated annealing on node positions) to minimize the crossing number, directly reducing the code's effective noise floor.
 
+### Embedding-Based Noise Models
+
+- **Distance-based crosstalk**: Noise between qubit pairs as a continuous function of their Euclidean distance in the embedding. Closer qubits experience stronger correlated noise regardless of whether their edges cross. Could use an inverse-power-law or exponential decay model.
+- **Edge-length amplitude damping**: Noise on each edge proportional to its geometric length in the embedding, modeling signal attenuation over longer physical connections. Longer wires in the layout incur more decoherence.
+
 ### Beyond Pauli Noise
 
 - **Coherent errors**: Stim is a Clifford simulator and cannot natively model coherent rotations. To support coherent errors, integrate with a density-matrix or state-vector simulator (e.g., Qiskit Aer, Cirq) for small codes, or develop a Pauli twirling approximation layer.

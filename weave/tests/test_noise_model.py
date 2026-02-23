@@ -63,3 +63,45 @@ def test_noise_model_invalid_crossing_length():
     """Crossing noise with wrong length should raise ValueError."""
     with pytest.raises(ValueError):
         NoiseModel(crossing=[0.01] * 3)
+
+
+def test_noise_model_negative_scalar():
+    """Negative scalar noise should raise ValueError."""
+    with pytest.raises(ValueError, match="non-negative"):
+        NoiseModel(data=-0.1)
+
+
+def test_noise_model_negative_list_element():
+    """Negative element in noise list should raise ValueError."""
+    with pytest.raises(ValueError, match="non-negative"):
+        NoiseModel(data=[0.1, -0.05, 0.1])
+
+
+def test_noise_model_sum_exceeds_one_scalar():
+    """Scalar noise that results in sum > 1 should raise ValueError."""
+    # data=3.1 => each element is 3.1/3 ≈ 1.033, sum ≈ 3.1 > 1
+    with pytest.raises(ValueError, match="sum"):
+        NoiseModel(data=3.1)
+
+
+def test_noise_model_sum_exceeds_one_list():
+    """List noise summing > 1 should raise ValueError."""
+    with pytest.raises(ValueError, match="sum"):
+        NoiseModel(data=[0.4, 0.4, 0.3])
+
+
+def test_noise_model_immutable():
+    """NoiseModel values should be tuples (immutable)."""
+    nm = NoiseModel(data=0.3)
+    assert isinstance(nm.data, tuple)
+    assert isinstance(nm.circuit, tuple)
+    assert isinstance(nm.crossing, tuple)
+    assert isinstance(nm.z_check, tuple)
+    assert isinstance(nm.x_check, tuple)
+
+
+def test_noise_model_boundary_sum():
+    """Noise parameters summing to exactly 1 should be accepted."""
+    # 3 params summing to exactly 1.0
+    nm = NoiseModel(data=[0.4, 0.3, 0.3])
+    np.testing.assert_almost_equal(sum(nm.data), 1.0)

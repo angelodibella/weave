@@ -21,19 +21,23 @@ class CSSCode(QuantumCode):
     Parameters
     ----------
     HX : np.ndarray
-        X-type parity check matrix.
+        X-type parity check matrix (binary, 2D).
     HZ : np.ndarray
-        Z-type parity check matrix.
-    circuit : Optional[stim.Circuit]
-        A Stim circuit to which the code circuit will be appended. If None, a new circuit is created.
+        Z-type parity check matrix (binary, 2D).
     rounds : int
-        Number of measurement rounds. Default is 3.
+        Number of measurement rounds (must be >= 1). Default is 3.
     noise : NoiseModel, optional
         Noise model for circuit operations. Default is a zero-noise model.
     experiment : str
         Experiment type ("z_memory" or "x_memory"). Default is "z_memory".
-    logical : Optional[Union[int, List[int]]]
+    logical : int or list of int, optional
         Index (or indices) of logical operators to use. Default is None (use all).
+
+    Raises
+    ------
+    ValueError
+        If HX/HZ are not binary 2D arrays, CSS condition is not met,
+        rounds < 1, or experiment is not recognized.
     """
 
     def __init__(
@@ -48,15 +52,27 @@ class CSSCode(QuantumCode):
         if noise is None:
             noise = NoiseModel()
 
+        # Validate inputs.
+        _validate_binary_matrix(HX, "HX")
+        _validate_binary_matrix(HZ, "HZ")
+
+        if rounds < 1:
+            raise ValueError(f"rounds must be >= 1, got {rounds}.")
+
+        if experiment not in ("z_memory", "x_memory"):
+            raise ValueError(
+                f"Experiment must be 'z_memory' or 'x_memory', got '{experiment}'."
+            )
+
         # Verify that HX and HZ satisfy the CSS condition.
         if not np.all(np.mod(np.dot(HX, HZ.T), 2) == 0):
             raise ValueError("CSS condition not satisfied.")
 
-        # Calculate logical qubits.
+        # Calculate logical qubits using exact GF(2) rank.
         k = (
             HZ.shape[1]
-            - np.linalg.matrix_rank(HZ.astype(float))
-            - np.linalg.matrix_rank(HX.astype(float))
+            - pcm.row_echelon(HZ)[1]
+            - pcm.row_echelon(HX)[1]
         )
         n = HZ.shape[1] + HZ.shape[0] + HX.shape[0]
 
@@ -66,10 +82,10 @@ class CSSCode(QuantumCode):
         # Code properties.
         self.HX = HX
         self.HZ = HZ
-        self.qubits = []
-        self.data_qubits = []
-        self.z_check_qubits = []
-        self.x_check_qubits = []
+        self.qubits: list[int] = []
+        self.data_qubits: list[int] = []
+        self.z_check_qubits: list[int] = []
+        self.x_check_qubits: list[int] = []
         self.logical = logical
 
         # Error correction parameters.
@@ -79,9 +95,9 @@ class CSSCode(QuantumCode):
         self._circuit: stim.Circuit | None = None
 
         # Embedding properties.
-        self.pos = None
-        self.graph: nx.Graph = None
-        self.crossings = []
+        self.pos: list[tuple[float, float]] | None = None
+        self.graph: nx.Graph | None = None
+        self.crossings: set[frozenset[tuple[int, int]]] = set()
 
         # Derived properties.
         self._compute_qubit_indices()
@@ -90,16 +106,20 @@ class CSSCode(QuantumCode):
     def circuit(self) -> stim.Circuit:
         """Lazily generate and return the Stim circuit."""
         if self._circuit is None:
-            self._circuit = stim.Circuit()
-            self.generate()
+            self._circuit = self._generate()
         return self._circuit
 
-    def generate(self) -> stim.Circuit:
+    def _generate(self) -> stim.Circuit:
         """
-        Build the Stim circuit for the code, including stabilizer operations, noise channels,
-        measurement rounds, detectors, and observable inclusions.
+        Build a fresh Stim circuit for the code, including stabilizer operations,
+        noise channels, measurement rounds, detectors, and observable inclusions.
+
+        Returns
+        -------
+        stim.Circuit
+            The complete Stim circuit.
         """
-        c = self._circuit
+        c = stim.Circuit()
 
         # ---------------- Circuit Head ----------------
 
@@ -108,8 +128,6 @@ class CSSCode(QuantumCode):
         elif self.experiment == "x_memory":
             c.append("RX", self.data_qubits)
             c.append("R", self.z_check_qubits + self.x_check_qubits)
-        else:
-            raise ValueError(f"Experiment not recognized: '{self.experiment}'.")
 
         # ---------------- Round Initialization ----------------
 
@@ -133,11 +151,18 @@ class CSSCode(QuantumCode):
             round_circuit.append("H", [target])
 
         # Noise for crossing edges.
+        # Each crossing is a frozenset of two edges. A crossing represents two
+        # wires that are physically close in the embedding, so the noise should
+        # target the physically meaningful qubit pair. For bipartite Tanner graphs
+        # (data-check edges), this means the two data-qubit endpoints.
+        data_set = set(self.data_qubits)
         for crossing in self.crossings:
-            for edge in crossing:
-                round_circuit.append(
-                    "PAULI_CHANNEL_2", [edge[0], edge[1]], self.noise.crossing
-                )
+            edges = list(crossing)
+            e1, e2 = edges[0], edges[1]
+            d1, d2 = _crossing_qubit_pair(e1, e2, data_set)
+            round_circuit.append(
+                "PAULI_CHANNEL_2", [d1, d2], self.noise.crossing
+            )
 
         # Apply single-qubit noise.
         round_circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise.data)
@@ -220,13 +245,33 @@ class CSSCode(QuantumCode):
 
         return c
 
-    def embed(self, pos: str | list[tuple[int, int]] | None = None) -> CSSCode:
+    def embed(
+        self,
+        pos: str | list[tuple[float, float]] | None = None,
+        seed: int | None = None,
+    ) -> CSSCode:
+        """
+        Embed the Tanner graph and compute edge crossings.
+
+        Parameters
+        ----------
+        pos : str or list of position tuples, optional
+            Layout specification. "random" is non-deterministic by default
+            unless a seed is provided.
+        seed : int, optional
+            Random seed for reproducible "random" layouts.
+
+        Returns
+        -------
+        CSSCode
+            self, for method chaining.
+        """
         self.graph = self._construct_graph()
 
         # Compute node positions using the general layout utility.
         if pos is None or isinstance(pos, str):
             self.pos = graph.compute_layout(
-                self.graph, pos or "random", index_key="index"
+                self.graph, pos or "random", index_key="index", seed=seed
             )
         else:
             self.pos = pos
@@ -351,9 +396,6 @@ class CSSCode(QuantumCode):
         **kwargs
             Additional keyword arguments for drawing.
         """
-        # # Need to compute positions for the graph
-        # pos = graph.compute_layout(self.graph, "tripartite", index_key="index")
-
         if self.pos is None:
             raise RuntimeError(
                 "Embedding not specified. Use the embed() method to generate node positions."
@@ -431,3 +473,57 @@ class CSSCode(QuantumCode):
             G.nodes[i]["layer"] = 2
 
         return nx.relabel_nodes(G, labels)
+
+
+def _validate_binary_matrix(matrix: np.ndarray, name: str) -> None:
+    """Validate that a matrix is a binary 2D numpy array."""
+    if not isinstance(matrix, np.ndarray):
+        raise ValueError(f"{name} must be a numpy array.")
+    if matrix.ndim != 2:
+        raise ValueError(f"{name} must be 2D, got {matrix.ndim}D.")
+    if not np.all(np.isin(matrix, [0, 1])):
+        raise ValueError(f"{name} must be binary (contain only 0s and 1s).")
+
+
+def _crossing_qubit_pair(
+    e1: tuple[int, int],
+    e2: tuple[int, int],
+    data_qubits: set[int],
+) -> tuple[int, int]:
+    """
+    Determine the physically meaningful qubit pair for a crossing.
+
+    For a bipartite Tanner graph where edges connect data qubits to check
+    qubits, a crossing means two data qubits' wires are near each other.
+    Returns the two data-qubit endpoints. If both edges share a data endpoint,
+    falls back to check-qubit endpoints.
+
+    Parameters
+    ----------
+    e1 : tuple of int
+        First crossing edge (node_a, node_b).
+    e2 : tuple of int
+        Second crossing edge (node_a, node_b).
+    data_qubits : set of int
+        Set of data qubit indices.
+
+    Returns
+    -------
+    tuple of int
+        The pair of qubits that should receive crossing noise.
+    """
+    d1 = [q for q in e1 if q in data_qubits]
+    d2 = [q for q in e2 if q in data_qubits]
+
+    # Normal case: each edge has one data qubit endpoint.
+    if len(d1) == 1 and len(d2) == 1 and d1[0] != d2[0]:
+        return d1[0], d2[0]
+
+    # Fallback: use the check-qubit endpoints instead.
+    c1 = [q for q in e1 if q not in data_qubits]
+    c2 = [q for q in e2 if q not in data_qubits]
+    if len(c1) == 1 and len(c2) == 1 and c1[0] != c2[0]:
+        return c1[0], c2[0]
+
+    # Last resort: return first endpoint of each edge.
+    return e1[0], e2[0]

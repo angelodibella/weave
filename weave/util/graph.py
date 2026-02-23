@@ -1,6 +1,6 @@
 """Graph utilities for visualizing and analyzing quantum error correction codes."""
 
-from typing import Any
+from __future__ import annotations
 
 import networkx as nx
 import numpy as np
@@ -11,6 +11,7 @@ def compute_layout(
     graph: nx.Graph,
     pos_spec: str | list[tuple[float, float]],
     index_key: str = "index",
+    seed: int | None = None,
 ) -> list[tuple[float, float]]:
     """
     Compute node positions for a graph based on a layout specification.
@@ -28,6 +29,9 @@ def compute_layout(
         If a list, positions are assumed to be provided.
     index_key : str, optional
         The node attribute key that holds the original index (default is "index").
+    seed : int, optional
+        Random seed for reproducible layouts. Passed to networkx layout functions
+        that support it (e.g., "random", "spring").
 
     Returns
     -------
@@ -41,9 +45,9 @@ def compute_layout(
     """
     if isinstance(pos_spec, str):
         if pos_spec in ("random", None):
-            pos_dict = nx.random_layout(graph)
+            pos_dict = nx.random_layout(graph, seed=seed)
         elif pos_spec == "spring":
-            pos_dict = nx.spring_layout(graph, iterations=1000)
+            pos_dict = nx.spring_layout(graph, iterations=1000, seed=seed)
         elif pos_spec == "bipartite":
             # For bipartite layout, assume nodes have a "type" attribute; otherwise, use all nodes.
             nodes = list(graph.nodes)
@@ -193,7 +197,7 @@ def draw(
     with_labels: bool = False,
     crossings: bool = True,
     connection_rad: float = 0.0,
-    **kwargs: Any,
+    **kwargs,
 ) -> None:
     """
     Draw a Tanner graph with default styling.

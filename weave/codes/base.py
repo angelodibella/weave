@@ -1,9 +1,13 @@
 """Base classes and abstractions for quantum error correction codes."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 import numpy as np
 import stim
+
+from ..util import pcm
 
 
 class NoiseModel:
@@ -32,8 +36,10 @@ class NoiseModel:
 
     Raises
     ------
-    AssertionError
-        If any noise parameter provided as a list does not have the expected length.
+    ValueError
+        If any noise parameter has the wrong length, contains negative values,
+        or exceeds Stim's probability constraints (PAULI_CHANNEL_1 params sum > 1,
+        PAULI_CHANNEL_2 params sum > 1).
     """
 
     def __init__(
@@ -61,9 +67,9 @@ class NoiseModel:
     @staticmethod
     def _process_noise(
         param: float | list[float], expected: int, name: str, divisor: float
-    ) -> list[float]:
+    ) -> tuple[float, ...]:
         """
-        Process a noise parameter by ensuring it is a list of the expected length.
+        Process a noise parameter into an immutable tuple of the expected length.
 
         If a single number is provided, it is uniformly divided by the divisor and repeated.
 
@@ -80,16 +86,40 @@ class NoiseModel:
 
         Returns
         -------
-        list of float
-            The processed noise parameter.
+        tuple of float
+            The processed noise parameter (immutable).
+
+        Raises
+        ------
+        ValueError
+            If values are negative, wrong length, or sum exceeds 1.
         """
         if isinstance(param, (int, float)):
-            return [param / divisor for _ in range(expected)]
-        if len(param) != expected:
+            if param < 0:
+                raise ValueError(
+                    f"{name} noise parameter must be non-negative, got {param}."
+                )
+            values = [param / divisor for _ in range(expected)]
+        else:
+            if len(param) != expected:
+                raise ValueError(
+                    f"{name} noise takes {expected} parameters, given {len(param)}."
+                )
+            for i, v in enumerate(param):
+                if v < 0:
+                    raise ValueError(
+                        f"{name} noise parameter[{i}] must be non-negative, got {v}."
+                    )
+            values = list(param)
+
+        total = sum(values)
+        if total > 1:
             raise ValueError(
-                f"{name} noise takes {expected} parameters, given {len(param)}."
+                f"{name} noise parameters sum to {total}, which exceeds 1. "
+                f"Stim requires PAULI_CHANNEL parameters to sum to <= 1."
             )
-        return list(param)
+
+        return tuple(values)
 
 
 class ClassicalCode:
@@ -124,7 +154,7 @@ class ClassicalCode:
     @property
     def k(self) -> int:
         """The dimension of the code."""
-        return self.n - np.linalg.matrix_rank(self.H.astype(float))
+        return self.n - pcm.row_echelon(self.H)[1]
 
     @property
     def m(self) -> int:
@@ -151,13 +181,13 @@ class QuantumCode(ABC):
         self.k = k
 
     @abstractmethod
-    def generate(self) -> stim.Circuit:
+    def _generate(self) -> stim.Circuit:
         """
         Generate a circuit to measure the syndrome of the code.
 
         Returns
         -------
-        Any
+        stim.Circuit
             A circuit representation for the syndrome measurement.
         """
         pass

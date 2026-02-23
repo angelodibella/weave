@@ -142,11 +142,10 @@ def test_hp_code_parity_check_dimensions(rep3_hamming7_matrices):
 
 
 def test_hp_code_invalid_experiment(rep3_matrices):
-    """Verify that an invalid experiment type raises a ValueError."""
+    """Verify that an invalid experiment type raises a ValueError at init."""
     H1, H2 = rep3_matrices
-    code = HypergraphProductCode(H1, H2, rounds=1, experiment="invalid")
-    with pytest.raises(ValueError):
-        _ = code.circuit
+    with pytest.raises(ValueError, match="Experiment must be"):
+        HypergraphProductCode(H1, H2, rounds=1, experiment="invalid")
 
 
 def test_hp_code_embed(rep3_matrices):
