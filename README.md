@@ -20,7 +20,7 @@ Weave builds CSS codes and hypergraph product codes, embeds their Tanner graphs 
 git clone https://github.com/angelodibella/weave.git
 cd weave
 uv sync                  # install all dependencies
-uv run pytest            # verify — should pass 60 tests
+uv run pytest            # verify — should pass 77 tests
 ```
 
 ---
@@ -145,13 +145,13 @@ This produces a CSS code whose parameters depend on both input codes. `Hypergrap
 
 ### Tanner Graphs and Crossings
 
-A Tanner graph is a bipartite graph connecting data qubits to their stabilizer checks. When this graph is embedded in 2D, edges may cross. Weave treats each crossing as a potential source of **correlated two-qubit noise** (cross-talk), injecting `PAULI_CHANNEL_2` errors on the crossing qubit pairs during circuit generation.
+A Tanner graph is a bipartite graph connecting data qubits to their stabilizer checks. When this graph is embedded in 2D, edges may cross. Weave treats each crossing as a potential source of **correlated two-qubit noise** (cross-talk), injecting `PAULI_CHANNEL_2` errors on the **data-qubit pair** of each crossing during circuit generation.
 
 Call `code.embed()` to compute a layout and detect crossings, then `code.draw()` to visualize:
 
 ```python
 code = CSSCode(HX=H, HZ=H, noise=NoiseModel(crossing=0.01))
-code.embed(pos="spring")
+code.embed(pos="spring", seed=42)   # seed for reproducibility
 code.draw()
 ```
 
@@ -167,7 +167,7 @@ code.draw()
 | `circuit` | `PAULI_CHANNEL_2` after each CNOT | 15 |
 | `crossing` | `PAULI_CHANNEL_2` on crossing pairs | 15 |
 
-Pass a scalar to distribute uniformly across parameters, or a list for fine-grained control.
+Pass a scalar to distribute uniformly across parameters, or a list for fine-grained control. All values must be non-negative and sum to at most 1 (per Stim's requirements). Values are stored as immutable tuples.
 
 ### Circuit Structure
 
@@ -183,30 +183,30 @@ Generated Stim circuits follow this structure:
 
 ### `CSSCode(HX, HZ, rounds=3, noise=None, experiment="z_memory", logical=None)`
 
-Core class for CSS code simulation. Key members:
+Core class for CSS code simulation. HX and HZ must be binary 2D numpy arrays satisfying the CSS condition. `rounds` must be >= 1. `experiment` must be `"z_memory"` or `"x_memory"` (validated at init). Key members:
 
 - `.circuit` — Lazy `stim.Circuit` property (generated on first access)
-- `.embed(pos=None)` — Compute Tanner graph layout and detect crossings. Accepts `"random"`, `"spring"`, `"bipartite"`, `"tripartite"`, or explicit coordinates
+- `.embed(pos=None, seed=None)` — Compute Tanner graph layout and detect crossings. Accepts `"random"`, `"spring"`, `"bipartite"`, `"tripartite"`, or explicit coordinates. Pass `seed` for deterministic layouts
 - `.draw()` — Matplotlib visualization (requires prior `embed()`)
 - `.find_logicals()` — Returns `(x_logicals, z_logicals)` with symplectic pairing
-- `.n`, `.k` — Code parameters
+- `.n`, `.k` — Code parameters (k computed via exact GF(2) rank)
 
 ### `HypergraphProductCode(H1, H2, rounds=3, noise=None, experiment="z_memory", logical=None)`
 
-Subclass of `CSSCode`. Computes the hypergraph product of two classical parity-check matrices.
+Subclass of `CSSCode`. Computes the hypergraph product of two classical parity-check matrices. H1 and H2 must be binary 2D numpy arrays.
 
 ### `NoiseModel(data=0.0, z_check=0.0, x_check=0.0, circuit=0.0, crossing=0.0)`
 
-Container for noise parameters. Each channel accepts a scalar or a list of floats.
+Container for noise parameters. Each channel accepts a scalar or a list of floats. Values must be non-negative and sum to at most 1. Stored as immutable tuples after construction.
 
 ### `weave.util.pcm`
 
 | Function | Description |
 |---|---|
-| `repetition(n)` | Repetition code parity-check matrix |
+| `repetition(n)` | Repetition code parity-check matrix (n >= 2) |
 | `hamming(n)` | Hamming code parity-check matrix (n must be 2^m - 1) |
 | `hypergraph_product(H1, H2)` | Returns `(HX, HZ)` tuple |
-| `distance(H)` | Brute-force minimum distance |
+| `distance(H)` | Brute-force minimum distance (enumerates all 2^k - 1 codewords, k <= 20) |
 | `row_echelon(M)` | GF(2) row echelon form |
 | `nullspace(M)` | GF(2) nullspace |
 | `row_basis(M)` | Independent row basis |
@@ -216,7 +216,7 @@ Container for noise parameters. Each channel accepts a scalar or a list of float
 
 | Function | Description |
 |---|---|
-| `compute_layout(graph, pos_spec)` | Compute node positions for a NetworkX graph |
+| `compute_layout(graph, pos_spec, seed=None)` | Compute node positions for a NetworkX graph |
 | `find_edge_crossings(pos, edges)` | Detect crossing edge pairs |
 | `draw(graph, pos, ...)` | Matplotlib Tanner graph renderer |
 
@@ -243,7 +243,7 @@ weave/
 ├── surface/
 │   ├── base.py                  # Surface ABC
 │   └── torus.py                 # Torus implementation
-├── tests/                       # 60 tests across 5 files
+├── tests/                       # 77 tests across 6 files
 └── util/
     ├── graph.py                 # Tanner graph layout, crossings, drawing
     └── pcm.py                   # GF(2) linear algebra and code constructions
@@ -261,12 +261,12 @@ weave/
 ## Testing
 
 ```bash
-uv run pytest                  # run all 60 tests
+uv run pytest                  # run all 77 tests
 uv run pytest -v               # verbose output
 uv run pytest weave/tests/test_pcm.py  # single file
 ```
 
-Test coverage includes: Steane code circuit correctness, noiseless detector validation, noisy detector error models, logical operator validity with symplectic pairing, lazy circuit generation/invalidation, CSS condition enforcement, noise model edge cases, hypergraph product parameter verification, GF(2) linear algebra, canvas-to-code bridge roundtrips, and code distance computation.
+Test coverage includes: Steane code circuit correctness, noiseless detector validation, noisy detector error models, logical operator validity with symplectic pairing, lazy circuit generation/invalidation, CSS condition enforcement, input validation (binary matrices, rounds, experiment type, noise bounds), noise model edge cases (negative values, sum > 1, immutability), crossing noise correctness (data-qubit targeting), deterministic embedding with seeds, hypergraph product parameter verification, GF(2) linear algebra, canvas-to-code bridge roundtrips, and code distance computation (including k > 1 combination enumeration).
 
 ---
 
@@ -276,7 +276,7 @@ Development is organized in three phases:
 
 - **Phase I — Physical Correctness**: Complete except TICK markers, CNOT scheduling, and idle noise
 - **Phase II — Bugs & Modernization**: Complete except sparse matrix support and performance optimizations
-- **Phase III — Novelty & Extensibility**: Crossing error models, topological surface embeddings, chain complexes, GUI-simulation bridge
+- **Phase III — Novelty & Extensibility**: Crossing error models, embedding-based noise models (distance-based crosstalk, edge-length amplitude damping), topological surface embeddings, chain complexes, GUI-simulation bridge
 
 See [ROADMAP.md](ROADMAP.md) for full details.
 
