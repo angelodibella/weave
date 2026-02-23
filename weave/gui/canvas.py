@@ -1,5 +1,6 @@
 import json
 import math
+from collections import deque
 from typing import Any
 
 from PySide6.QtWidgets import QWidget, QMenu, QWidgetAction, QHBoxLayout, QLabel, QFileDialog
@@ -1759,11 +1760,11 @@ class Canvas(QWidget):
 
         # BFS to find connected component.
         visited = set()
-        queue = [node_id]
+        queue = deque([node_id])
         visited.add(node_id)
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for edge in self.edges:
                 if edge['source'] == current and edge['target'] not in visited:
                     queue.append(edge['target'])

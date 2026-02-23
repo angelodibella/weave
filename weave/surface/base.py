@@ -2,7 +2,8 @@
 """Abstract base class for geometric surfaces used for embedding QEC codes."""
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Any, Optional, Dict, Sequence, Union
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -38,7 +39,7 @@ class Surface(ABC):
         pass
 
     @abstractmethod
-    def set_intrinsic_coords(self, coords: Dict[int, Tuple[float, float]]) -> None:
+    def set_intrinsic_coords(self, coords: dict[int, tuple[float, float]]) -> None:
         """
         Sets the intrinsic 2D coordinates for nodes.
 
@@ -51,7 +52,7 @@ class Surface(ABC):
 
     @abstractmethod
     def get_shortest_path(
-        self, coord1: Tuple[float, float], coord2: Tuple[float, float]
+        self, coord1: tuple[float, float], coord2: tuple[float, float]
     ) -> Any:
         """
         Represents the shortest path (geodesic) between two points on the surface.
@@ -95,7 +96,7 @@ class Surface(ABC):
     @abstractmethod
     def check_intersection(
         self, path1: Any, path2: Any, return_points: bool = False
-    ) -> Union[bool, List[Tuple[float, float]]]:
+    ) -> bool | list[tuple[float, float]]:
         """
         Checks if two shortest paths intersect, optionally returning intrinsic (u, v) points.
         ... (rest of docstring) ...
@@ -108,7 +109,7 @@ class Surface(ABC):
         pass
 
     @abstractmethod
-    def get_boundary_info(self) -> Optional[Dict[str, Any]]:
+    def get_boundary_info(self) -> dict[str, Any] | None:
         """Provides info for drawing 2D projection boundaries."""
         pass
 
@@ -125,14 +126,14 @@ class Surface(ABC):
         pass
 
     def get_3d_mesh(
-        self, **kwargs
-    ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        self, **kwargs: Any
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Generates coordinate arrays (X, Y, Z) for plotting the surface mesh in 3D."""
         return None  # Default: no mesh
 
     def get_3d_intersection_points(
         self, path1: Any, path2: Any
-    ) -> List[Tuple[float, float, float]]:
+    ) -> list[tuple[float, float, float]]:
         """
         Calculates intersection points of two paths in 3D embedding space.
 

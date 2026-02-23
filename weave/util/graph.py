@@ -1,6 +1,7 @@
 """Graph utilities for visualizing and analyzing quantum error correction codes."""
 
-from typing import List, Tuple, Dict, Set, Union, Optional, Any, FrozenSet
+from typing import Any
+
 import networkx as nx
 import numpy as np
 from matplotlib import pyplot as plt
@@ -8,9 +9,9 @@ from matplotlib import pyplot as plt
 
 def compute_layout(
     graph: nx.Graph,
-    pos_spec: Union[str, List[Tuple[float, float]]],
+    pos_spec: str | list[tuple[float, float]],
     index_key: str = "index",
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     """
     Compute node positions for a graph based on a layout specification.
 
@@ -69,8 +70,8 @@ def compute_layout(
 
 
 def find_edge_crossings(
-    pos: List[Tuple[float, float]], edges: List[Tuple[int, int]]
-) -> Set[FrozenSet[Tuple[int, int]]]:
+    pos: list[tuple[float, float]], edges: list[tuple[int, int]]
+) -> set[frozenset[tuple[int, int]]]:
     """
     Identify intersections among a set of edges based on node positions.
 
@@ -108,7 +109,7 @@ def find_edge_crossings(
 
 
 def _ccw(
-    A: Tuple[float, float], B: Tuple[float, float], C: Tuple[float, float]
+    A: tuple[float, float], B: tuple[float, float], C: tuple[float, float]
 ) -> bool:
     """
     Check if three points make a counter-clockwise turn.
@@ -127,10 +128,10 @@ def _ccw(
 
 
 def _intersect(
-    A: Tuple[float, float],
-    B: Tuple[float, float],
-    C: Tuple[float, float],
-    D: Tuple[float, float],
+    A: tuple[float, float],
+    B: tuple[float, float],
+    C: tuple[float, float],
+    D: tuple[float, float],
 ) -> bool:
     """
     Check if line segments AB and CD intersect.
@@ -151,11 +152,11 @@ def _intersect(
 
 
 def line_intersection(
-    a: Tuple[float, float],
-    b: Tuple[float, float],
-    c: Tuple[float, float],
-    d: Tuple[float, float],
-) -> Optional[Tuple[float, float]]:
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+) -> tuple[float, float] | None:
     """
     Compute the intersection point of lines ab and cd.
 
@@ -188,11 +189,11 @@ def line_intersection(
 
 def draw(
     graph: nx.Graph,
-    pos: List[Tuple[float, float]],
+    pos: list[tuple[float, float]],
     with_labels: bool = False,
     crossings: bool = True,
     connection_rad: float = 0.0,
-    **kwargs,
+    **kwargs: Any,
 ) -> None:
     """
     Draw a Tanner graph with default styling.

@@ -28,23 +28,26 @@ The highest priority. Every circuit Weave generates must faithfully implement th
 
 ## II. Bugs, Modernization, and Optimization
 
-### Known Issues
+### Completed (Feb 2026)
 
-- **Eager circuit generation**: `CSSCode.__init__()` calls `self.generate()` at construction time, then `embed()` clears and regenerates the circuit. This means every code object builds its circuit twice if embedded. Consider making generation lazy or removing the `generate()` call from `__init__`.
-- **Stale docstrings**: `HypergraphProductCode`'s docstring still references `clist1`/`clist2` parameters, but the constructor now takes `H1`/`H2` matrices directly.
-- **`_reorder_matrix` assumption**: The interleaving loop in `pcm._reorder_matrix` assumes `n1 >= r1`. If `r1 > n1`, some right-split blocks are silently dropped. Add a guard or handle the asymmetric case.
-- **`NoiseModel` type check**: `np.issubdtype(type(param), np.number)` may not reliably detect plain Python `float`/`int` across all NumPy versions. Consider `isinstance(param, (int, float))` as a more robust check.
-- **GUI BFS queue**: `Canvas._detect_connected_component` uses `list.pop(0)` which is O(n). Use `collections.deque` for O(1) popleft.
+- ~~**Eager circuit generation**~~: `CSSCode.circuit` is now a lazy property. Circuit is only generated on first access; `embed()` invalidates the cache and triggers regeneration on next access. No more double-build.
+- ~~**Stale docstrings**~~: `HypergraphProductCode` docstring updated to reflect `H1`/`H2` matrix parameters.
+- ~~**`_reorder_matrix` assumption**~~: Fixed to handle `r1 > n1` by iterating up to `max(n1, r1)` instead of only `n1`.
+- ~~**`NoiseModel` type check**~~: Replaced `np.issubdtype(type(param), np.number)` with `isinstance(param, (int, float))`. Changed from `assert` to `raise ValueError` for proper error handling.
+- ~~**GUI BFS queue**~~: Replaced `list.pop(0)` with `collections.deque.popleft()` in `Canvas._detect_connected_component`.
+- ~~**Type annotations**~~: Migrated all source files from `typing.List`, `typing.Tuple`, `typing.Optional`, `typing.Union` to built-in generics (`list`, `tuple`, `X | None`, `X | Y`).
+- ~~**Build system**~~: Migrated from `poetry-core` to `hatchling` as build backend. Moved test dependencies to `[project.optional-dependencies]`.
+- ~~**Testing coverage**~~: Expanded from 30 to 50 tests. New coverage includes:
+  - Steane code [[7,1,3]] circuit correctness (noiseless detectors, noisy DEM, logical validity).
+  - Lazy circuit generation and invalidation behavior.
+  - CSS condition violation detection.
+  - NoiseModel edge cases (zero, int input, wrong lengths for all channels).
+  - Code distance computation, asymmetric HP codes, reordering preservation of CSS condition.
+- ~~**Torus warning**~~: Replaced `print()` warning with `warnings.warn()`.
 
-### Modernization
+### Remaining
 
-- **Type annotations**: Migrate from `typing.List`, `typing.Tuple`, etc. to built-in generics (`list`, `tuple`) — available since Python 3.10, which is our minimum.
 - **Sparse matrices**: `pcm.hypergraph_product` uses dense NumPy arrays and `np.kron`. For larger codes, switch to `scipy.sparse` for the Kronecker products and parity-check storage.
-- **Testing coverage**: Expand `pytest` tests to cover:
-  - Circuit correctness: compare detector error models against known-good references for small codes (e.g., [[7,1,3]] Steane code from `hamming(7)`).
-  - Logical operator validity: check `HX @ lz.T % 2 == 0` and `HZ @ lx.T % 2 == 0`.
-  - Noise model edge cases: list vs. scalar input, mismatched lengths.
-  - Round-trip `to_clist` / `to_matrix` fidelity.
 
 ### Performance
 

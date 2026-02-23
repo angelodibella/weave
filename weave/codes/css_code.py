@@ -1,9 +1,10 @@
 """Implementation of CSS (Calderbank-Shor-Steane) quantum error-correcting codes."""
 
+from __future__ import annotations
+
 import numpy as np
 import stim
 import networkx as nx
-from typing import Optional, Self, Union, List, Tuple, Any
 
 from .base import NoiseModel, QuantumCode
 from ..util import pcm, graph
@@ -40,9 +41,9 @@ class CSSCode(QuantumCode):
         HX: np.ndarray,
         HZ: np.ndarray,
         rounds: int = 3,
-        noise: Optional[NoiseModel] = None,
+        noise: NoiseModel | None = None,
         experiment: str = "z_memory",
-        logical: Optional[Union[int, List[int]]] = None,
+        logical: int | list[int] | None = None,
     ) -> None:
         if noise is None:
             noise = NoiseModel()
@@ -75,7 +76,7 @@ class CSSCode(QuantumCode):
         self.experiment = experiment
         self.noise = noise
         self.rounds = rounds
-        self.circuit = stim.Circuit()
+        self._circuit: stim.Circuit | None = None
 
         # Embedding properties.
         self.pos = None
@@ -85,79 +86,85 @@ class CSSCode(QuantumCode):
         # Derived properties.
         self._compute_qubit_indices()
 
-        # Generate the error-correcting circuit.
-        self.generate()
+    @property
+    def circuit(self) -> stim.Circuit:
+        """Lazily generate and return the Stim circuit."""
+        if self._circuit is None:
+            self._circuit = stim.Circuit()
+            self.generate()
+        return self._circuit
 
     def generate(self) -> stim.Circuit:
         """
         Build the Stim circuit for the code, including stabilizer operations, noise channels,
         measurement rounds, detectors, and observable inclusions.
         """
+        c = self._circuit
 
         # ---------------- Circuit Head ----------------
 
         if self.experiment == "z_memory":
-            self.circuit.append("R", self.qubits)
+            c.append("R", self.qubits)
         elif self.experiment == "x_memory":
-            self.circuit.append("RX", self.data_qubits)
-            self.circuit.append("R", self.z_check_qubits + self.x_check_qubits)
+            c.append("RX", self.data_qubits)
+            c.append("R", self.z_check_qubits + self.x_check_qubits)
         else:
             raise ValueError(f"Experiment not recognized: '{self.experiment}'.")
 
         # ---------------- Round Initialization ----------------
 
-        circuit = stim.Circuit()
+        round_circuit = stim.Circuit()
 
         # Z-check stabilizer operations.
         for target, row in zip(self.z_check_qubits, self.HZ):
             data_idxs = [self.data_qubits[i] for i, v in enumerate(row) if v]
             for dq in data_idxs:
-                circuit.append("CNOT", [dq, target])
-                circuit.append("PAULI_CHANNEL_2", [dq, target], self.noise.circuit)
+                round_circuit.append("CNOT", [dq, target])
+                round_circuit.append("PAULI_CHANNEL_2", [dq, target], self.noise.circuit)
 
         # X-check stabilizer operations.
         # Uses H-CNOT-...-CNOT-H bracket per check (equivalent to measuring X stabilizers).
         for target, row in zip(self.x_check_qubits, self.HX):
             data_idxs = [self.data_qubits[i] for i, v in enumerate(row) if v]
-            circuit.append("H", [target])
+            round_circuit.append("H", [target])
             for dq in data_idxs:
-                circuit.append("CNOT", [target, dq])
-                circuit.append("PAULI_CHANNEL_2", [dq, target], self.noise.circuit)
-            circuit.append("H", [target])
+                round_circuit.append("CNOT", [target, dq])
+                round_circuit.append("PAULI_CHANNEL_2", [dq, target], self.noise.circuit)
+            round_circuit.append("H", [target])
 
         # Noise for crossing edges.
         for crossing in self.crossings:
             for edge in crossing:
-                circuit.append(
+                round_circuit.append(
                     "PAULI_CHANNEL_2", [edge[0], edge[1]], self.noise.crossing
                 )
 
         # Apply single-qubit noise.
-        circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise.data)
-        circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise.z_check)
-        circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise.x_check)
+        round_circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise.data)
+        round_circuit.append("PAULI_CHANNEL_1", self.z_check_qubits, self.noise.z_check)
+        round_circuit.append("PAULI_CHANNEL_1", self.x_check_qubits, self.noise.x_check)
 
         # Measure and reset before the rest of stabilizer rounds.
-        circuit.append("MR", self.z_check_qubits + self.x_check_qubits)
+        round_circuit.append("MR", self.z_check_qubits + self.x_check_qubits)
 
         # Add first round to the circuit.
-        self.circuit += circuit
+        c += round_circuit
 
         # Add initial detectors.
         if self.experiment == "z_memory":
             for k in range(len(self.z_check_qubits)):
-                self.circuit.append(
+                c.append(
                     "DETECTOR", [stim.target_rec(-1 - k - len(self.x_check_qubits))]
                 )
         elif self.experiment == "x_memory":
             for k in range(len(self.x_check_qubits)):
-                self.circuit.append("DETECTOR", [stim.target_rec(-1 - k)])
+                c.append("DETECTOR", [stim.target_rec(-1 - k)])
 
         # ---------------- Round Operations ----------------
 
         # Add the detectors for the rest of the rounds on all stabilizers.
         for k in range(len(self.z_check_qubits + self.x_check_qubits)):
-            circuit.append(
+            round_circuit.append(
                 "DETECTOR",
                 [
                     stim.target_rec(-1 - k),
@@ -167,12 +174,12 @@ class CSSCode(QuantumCode):
                 ],
             )
 
-        self.circuit += circuit * (self.rounds - 1)
+        c += round_circuit * (self.rounds - 1)
 
         # ---------------- Circuit Tail ----------------
 
         if self.experiment == "z_memory":
-            self.circuit.append("M", self.data_qubits)
+            c.append("M", self.data_qubits)
             for k in range(len(self.z_check_qubits)):
                 row = self.HZ[-1 - k]
                 idxs = [i for i, v in enumerate(row) if v]
@@ -183,16 +190,16 @@ class CSSCode(QuantumCode):
                 ]
                 for idx in idxs:
                     recs.append(stim.target_rec(idx - len(self.data_qubits)))
-                self.circuit.append("DETECTOR", recs)
+                c.append("DETECTOR", recs)
         elif self.experiment == "x_memory":
-            self.circuit.append("MX", self.data_qubits)
+            c.append("MX", self.data_qubits)
             for k in range(len(self.x_check_qubits)):
                 row = self.HX[-1 - k]
                 idxs = [i for i, v in enumerate(row) if v]
                 recs = [stim.target_rec(-1 - k - len(self.data_qubits))]
                 for idx in idxs:
                     recs.append(stim.target_rec(idx - len(self.data_qubits)))
-                self.circuit.append("DETECTOR", recs)
+                c.append("DETECTOR", recs)
 
         # Logical operator extraction and inclusion.
         x_logicals, z_logicals = self.find_logicals()
@@ -202,7 +209,6 @@ class CSSCode(QuantumCode):
             z_logical_qubits if self.experiment == "z_memory" else x_logical_qubits
         )
 
-        orig_count = len(logicals)
         if self.logical is not None:
             if isinstance(self.logical, int):
                 self.logical = [self.logical]
@@ -210,11 +216,11 @@ class CSSCode(QuantumCode):
 
         for i, lq in enumerate(logicals):
             recs = [stim.target_rec(q - len(self.data_qubits)) for q in lq]
-            self.circuit.append("OBSERVABLE_INCLUDE", recs, i)
+            c.append("OBSERVABLE_INCLUDE", recs, i)
 
-        return self.circuit
+        return c
 
-    def embed(self, pos: Optional[Union[str, List[Tuple[int, int]]]] = None) -> Self:
+    def embed(self, pos: str | list[tuple[int, int]] | None = None) -> CSSCode:
         self.graph = self._construct_graph()
 
         # Compute node positions using the general layout utility.
@@ -232,13 +238,12 @@ class CSSCode(QuantumCode):
         ]
         self.crossings = graph.find_edge_crossings(self.pos, edges)
 
-        # Clear the circuit and regenerate it with the new embedding.
-        self.circuit = stim.Circuit()
-        self.generate()
-        
+        # Invalidate the circuit so it regenerates with the new embedding.
+        self._circuit = None
+
         return self
 
-    def find_logicals(self) -> Tuple[np.ndarray, np.ndarray]:
+    def find_logicals(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute logical operators from the parity-check matrices.
 
@@ -280,7 +285,7 @@ class CSSCode(QuantumCode):
     @staticmethod
     def _symplectic_gram_schmidt(
         x_logicals: np.ndarray, z_logicals: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Pair X and Z logical operators into a symplectic basis.
 
