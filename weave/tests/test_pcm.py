@@ -184,3 +184,31 @@ def test_find_pivot_columns():
     """find_pivot_columns should return correct pivots for identity."""
     I = np.eye(4, dtype=int)
     assert pcm.find_pivot_columns(I) == [0, 1, 2, 3]
+
+
+# ---- Repetition code validation ----
+
+def test_repetition_n_less_than_2():
+    """repetition(n) should raise ValueError for n < 2."""
+    with pytest.raises(ValueError, match="must be >= 2"):
+        pcm.repetition(1)
+
+    with pytest.raises(ValueError, match="must be >= 2"):
+        pcm.repetition(0)
+
+
+# ---- Distance with k>1 (combination enumeration) ----
+
+def test_distance_k_greater_than_1():
+    """Test distance computation for a code where the minimum-weight codeword
+    is a combination of basis vectors, not an individual basis vector."""
+    # Hamming(15, 11, 3) has k=11, but distance is still 3.
+    H = pcm.hamming(15)
+    assert pcm.distance(H) == 3
+
+
+def test_distance_repetition_code_combinations():
+    """Repetition code should still return correct distance with new implementation."""
+    for n in [3, 4, 5, 7]:
+        H = pcm.repetition(n)
+        assert pcm.distance(H) == n

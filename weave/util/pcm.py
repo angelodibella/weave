@@ -1,6 +1,11 @@
 """Parity-check matrix utilities for classical and quantum error correction."""
 
+from __future__ import annotations
+
+import warnings
+
 import numpy as np
+from itertools import combinations
 
 
 # =============================================================================
@@ -174,13 +179,20 @@ def repetition(n: int) -> np.ndarray:
     Parameters
     ----------
     n : int
-        Length of the repetition code.
+        Length of the repetition code (must be >= 2).
 
     Returns
     -------
     np.ndarray
         A (n-1) x n parity-check matrix.
+
+    Raises
+    ------
+    ValueError
+        If n < 2.
     """
+    if n < 2:
+        raise ValueError(f"Repetition code length must be >= 2, got {n}.")
     H = np.zeros((n - 1, n), dtype=int)
     np.fill_diagonal(H, 1)
     for i in range(n - 1):
@@ -258,14 +270,13 @@ def hypergraph_product(
     HZ = np.append(HZ_left, HZ_right, axis=1)
 
     if reordered:
-        HX = _reorder_matrix(HX, HX_left, HX_right, n1, r1)
-        HZ = _reorder_matrix(HZ, HZ_left, HZ_right, n1, r1)
+        HX = _reorder_matrix(HX_left, HX_right, n1, r1)
+        HZ = _reorder_matrix(HZ_left, HZ_right, n1, r1)
 
     return HX.astype(int), HZ.astype(int)
 
 
 def _reorder_matrix(
-    full_matrix: np.ndarray,
     left_part: np.ndarray,
     right_part: np.ndarray,
     n1: int,
@@ -276,8 +287,6 @@ def _reorder_matrix(
 
     Parameters
     ----------
-    full_matrix : np.ndarray
-        The original concatenated matrix.
     left_part : np.ndarray
         The left part of the matrix to reorder.
     right_part : np.ndarray
@@ -364,7 +373,8 @@ def distance(H: np.ndarray) -> int:
     """
     Compute the minimum distance of a code defined by parity-check matrix H.
 
-    For small codes only, as this is a brute-force computation.
+    Enumerates all 2^k - 1 non-zero GF(2) linear combinations of nullspace
+    basis vectors. For small codes only (k <= 20); raises ValueError for larger k.
 
     Parameters
     ----------
@@ -375,18 +385,33 @@ def distance(H: np.ndarray) -> int:
     -------
     int
         The minimum distance of the code.
-    """
-    n = H.shape[1]
-    ker = nullspace(H)
 
-    if ker.shape[0] == 0:  # Trivial code
+    Raises
+    ------
+    ValueError
+        If the nullspace dimension exceeds 20 (infeasible brute-force).
+    """
+    ker = nullspace(H)
+    k = ker.shape[0]
+
+    if k == 0:  # Trivial code
         return float("inf")
 
-    # Compute weights of all non-zero codewords
+    if k > 20:
+        raise ValueError(
+            f"Brute-force distance computation infeasible for k={k} (> 20). "
+            f"Would require enumerating {2**k - 1} codewords."
+        )
+
+    # Enumerate all non-zero GF(2) linear combinations of basis vectors.
     min_weight = float("inf")
-    for codeword in ker:
-        weight = np.sum(codeword)
-        if 0 < weight < min_weight:
-            min_weight = weight
+    for r in range(1, k + 1):
+        for combo in combinations(range(k), r):
+            codeword = np.zeros(ker.shape[1], dtype=int)
+            for idx in combo:
+                codeword = (codeword + ker[idx]) % 2
+            weight = np.sum(codeword)
+            if 0 < weight < min_weight:
+                min_weight = weight
 
     return min_weight

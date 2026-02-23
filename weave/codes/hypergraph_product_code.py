@@ -1,9 +1,11 @@
 """Implementation of hypergraph product codes."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from .base import NoiseModel
-from .css_code import CSSCode
+from .css_code import CSSCode, _validate_binary_matrix
 from ..util import pcm
 
 
@@ -40,6 +42,9 @@ class HypergraphProductCode(CSSCode):
         experiment: str = "z_memory",
         logical: int | list[int] | None = None,
     ) -> None:
+        _validate_binary_matrix(H1, "H1")
+        _validate_binary_matrix(H2, "H2")
+
         self.H1: np.ndarray = H1
         self.H2: np.ndarray = H2
 
