@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 
-from .kernels import Kernel
+from ..ir.kernel import Kernel
 
 
 def pair_amplitude(d: float, J0: float, kernel: Kernel) -> float:
