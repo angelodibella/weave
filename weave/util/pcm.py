@@ -14,7 +14,11 @@ from itertools import combinations
 
 def row_echelon(matrix: np.ndarray) -> tuple[np.ndarray, int, np.ndarray, list[int]]:
     """
-    Perform Gaussian elimination over GF(2) to get row echelon form.
+    Perform Gaussian elimination over GF(2) to get reduced row echelon form.
+
+    This computes *reduced* row echelon form (RREF): each pivot column has a
+    single 1 (above and below the pivot are eliminated). The historical name
+    is kept for backwards compatibility.
 
     Parameters
     ----------
@@ -25,7 +29,7 @@ def row_echelon(matrix: np.ndarray) -> tuple[np.ndarray, int, np.ndarray, list[i
     -------
     Tuple[np.ndarray, int, np.ndarray, List[int]]
         (reduced_matrix, rank, transformation_matrix, pivot_columns).
-        - reduced_matrix: Row echelon form of the input.
+        - reduced_matrix: Reduced row echelon form of the input.
         - rank: The rank of the matrix.
         - transformation_matrix: The row operations applied (M such that M @ matrix = reduced).
         - pivot_columns: Indices of the pivot columns.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import combinations
+
 import numpy as np
 import stim
 import networkx as nx
@@ -74,7 +76,10 @@ class CSSCode(QuantumCode):
             - pcm.row_echelon(HZ)[1]
             - pcm.row_echelon(HX)[1]
         )
-        n = HZ.shape[1] + HZ.shape[0] + HX.shape[0]
+        # n in [[n, k, d]] counts data qubits only, following the QEC
+        # convention. Ancillas are a property of the extraction circuit
+        # and are reported separately via n_total.
+        n = HZ.shape[1]
 
         # Initialize the parent class.
         super().__init__(n=n, k=k)
@@ -108,6 +113,11 @@ class CSSCode(QuantumCode):
         if self._circuit is None:
             self._circuit = self._generate()
         return self._circuit
+
+    @property
+    def n_total(self) -> int:
+        """Total number of qubits in the extraction circuit (data + ancillas)."""
+        return len(self.qubits)
 
     def _generate(self) -> stim.Circuit:
         """
@@ -155,10 +165,15 @@ class CSSCode(QuantumCode):
         # wires that are physically close in the embedding, so the noise should
         # target the physically meaningful qubit pair. For bipartite Tanner graphs
         # (data-check edges), this means the two data-qubit endpoints.
+        #
+        # Canonicalize to a sorted list of sorted edge pairs so that iteration
+        # order (and therefore the emitted circuit) is deterministic across runs.
         data_set = set(self.data_qubits)
-        for crossing in self.crossings:
-            edges = list(crossing)
-            e1, e2 = edges[0], edges[1]
+        sorted_crossings = sorted(
+            tuple(sorted(tuple(sorted(edge)) for edge in crossing))
+            for crossing in self.crossings
+        )
+        for e1, e2 in sorted_crossings:
             d1, d2 = _crossing_qubit_pair(e1, e2, data_set)
             round_circuit.append(
                 "PAULI_CHANNEL_2", [d1, d2], self.noise.crossing
@@ -327,6 +342,29 @@ class CSSCode(QuantumCode):
 
         return x_logicals, z_logicals
 
+    def distance(self) -> int:
+        """
+        Compute the quantum code distance by exhaustive enumeration.
+
+        The quantum distance is the minimum Hamming weight of a nontrivial
+        logical operator: min weight over ker(HZ) \\ rowspace(HX) for
+        X-type operators, and ker(HX) \\ rowspace(HZ) for Z-type. The code
+        distance is the minimum of the two.
+
+        Returns
+        -------
+        int
+            The minimum weight of a nontrivial logical operator.
+
+        Raises
+        ------
+        ValueError
+            If either nullspace dimension exceeds 20 (brute force infeasible).
+        """
+        x_dist = _min_nontrivial_weight(self.HZ, self.HX)
+        z_dist = _min_nontrivial_weight(self.HX, self.HZ)
+        return min(x_dist, z_dist)
+
     @staticmethod
     def _symplectic_gram_schmidt(
         x_logicals: np.ndarray, z_logicals: np.ndarray
@@ -363,6 +401,12 @@ class CSSCode(QuantumCode):
                     if j != i:
                         z[[i, j]] = z[[j, i]]
                     break
+            else:
+                raise RuntimeError(
+                    f"No Z-logical anticommutes with X-logical {i}; "
+                    f"logical basis is degenerate. This indicates an upstream "
+                    f"error in find_logicals or a malformed CSS code."
+                )
 
             # Make all other operators commute with x[i] and z[i].
             for j in range(k):
@@ -491,12 +535,13 @@ def _crossing_qubit_pair(
     data_qubits: set[int],
 ) -> tuple[int, int]:
     """
-    Determine the physically meaningful qubit pair for a crossing.
+    Return the data-qubit endpoints of a pair of crossing Tanner-graph edges.
 
-    For a bipartite Tanner graph where edges connect data qubits to check
-    qubits, a crossing means two data qubits' wires are near each other.
-    Returns the two data-qubit endpoints. If both edges share a data endpoint,
-    falls back to check-qubit endpoints.
+    A crossing between two bipartite (data <-> check) edges means two
+    distinct data qubit wires are near each other in the embedding; the
+    noise channel therefore acts on that data-qubit pair. The returned
+    pair is canonicalized (smaller index first) for deterministic
+    iteration order.
 
     Parameters
     ----------
@@ -510,20 +555,94 @@ def _crossing_qubit_pair(
     Returns
     -------
     tuple of int
-        The pair of qubits that should receive crossing noise.
+        The pair of data qubits (sorted) that should receive crossing noise.
+
+    Raises
+    ------
+    RuntimeError
+        If the edges do not each contribute exactly one distinct data qubit.
+        This should be unreachable because find_edge_crossings explicitly
+        skips shared-endpoint pairs in a bipartite Tanner graph.
     """
     d1 = [q for q in e1 if q in data_qubits]
     d2 = [q for q in e2 if q in data_qubits]
 
-    # Normal case: each edge has one data qubit endpoint.
-    if len(d1) == 1 and len(d2) == 1 and d1[0] != d2[0]:
-        return d1[0], d2[0]
+    if not (len(d1) == 1 and len(d2) == 1 and d1[0] != d2[0]):
+        raise RuntimeError(
+            f"Unexpected crossing edge pair {e1} x {e2}: expected each edge "
+            f"to contribute exactly one distinct data qubit endpoint."
+        )
 
-    # Fallback: use the check-qubit endpoints instead.
-    c1 = [q for q in e1 if q not in data_qubits]
-    c2 = [q for q in e2 if q not in data_qubits]
-    if len(c1) == 1 and len(c2) == 1 and c1[0] != c2[0]:
-        return c1[0], c2[0]
+    q1, q2 = d1[0], d2[0]
+    return (q1, q2) if q1 < q2 else (q2, q1)
 
-    # Last resort: return first endpoint of each edge.
-    return e1[0], e2[0]
+
+def _min_nontrivial_weight(
+    H_commute: np.ndarray, H_stab: np.ndarray
+) -> float:
+    """
+    Minimum Hamming weight over ker(H_commute) \\ rowspace(H_stab).
+
+    Enumerates all 2^dim - 1 non-zero elements of ker(H_commute), skips
+    those in rowspace(H_stab) (trivial stabilizer elements), and returns
+    the minimum weight. Used by CSSCode.distance() to compute each sector's
+    distance exactly.
+
+    Parameters
+    ----------
+    H_commute : np.ndarray
+        Parity-check matrix whose kernel contains the candidate operators
+        (e.g. HZ for X-sector, HX for Z-sector).
+    H_stab : np.ndarray
+        Stabilizer parity-check matrix for the same sector (e.g. HX for
+        X-sector, HZ for Z-sector). Nonzero rows are the stabilizer
+        generators; an element of ker(H_commute) is a trivial logical iff
+        it lies in this row space.
+
+    Returns
+    -------
+    float
+        Minimum Hamming weight of a nontrivial logical, or inf if no
+        nontrivial logical exists.
+
+    Raises
+    ------
+    ValueError
+        If the nullspace dimension exceeds 20 (brute force infeasible).
+    """
+    ker = pcm.nullspace(H_commute)
+    stab = pcm.row_basis(H_stab)
+    dim_ker = ker.shape[0]
+
+    if dim_ker == 0:
+        return float("inf")
+    if dim_ker > 20:
+        raise ValueError(
+            f"Distance enumeration infeasible for {dim_ker}-dimensional "
+            f"nullspace (> 20). Would require enumerating {2**dim_ker - 1} "
+            f"codewords."
+        )
+
+    n = ker.shape[1]
+    stab_rank = stab.shape[0]
+    min_wt = float("inf")
+
+    for r in range(1, dim_ker + 1):
+        for combo in combinations(range(dim_ker), r):
+            u = np.zeros(n, dtype=int)
+            for idx in combo:
+                u = (u + ker[idx]) % 2
+            wt = int(u.sum())
+            if wt == 0 or wt >= min_wt:
+                continue
+            # Check whether u is in rowspace(H_stab): if adding u to the
+            # stabilizer basis leaves the rank unchanged, u is trivial.
+            if stab_rank == 0:
+                min_wt = wt
+                continue
+            aug = np.vstack([stab, u.reshape(1, -1)])
+            if pcm.row_echelon(aug)[1] == stab_rank:
+                continue  # u is a stabilizer, trivial logical
+            min_wt = wt
+
+    return min_wt

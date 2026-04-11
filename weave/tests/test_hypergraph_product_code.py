@@ -26,10 +26,11 @@ def test_hp_code_parameters(rep3_matrices):
     H1, H2 = rep3_matrices
     code = HypergraphProductCode(H1, H2, rounds=1)
     assert code.k == 1
+    assert code.n == 13
     assert len(code.data_qubits) == 13
     assert len(code.z_check_qubits) == 6
     assert len(code.x_check_qubits) == 6
-    assert code.n == 25
+    assert code.n_total == 25
 
 
 def test_hp_code_stim_circuit(rep3_matrices):
@@ -75,8 +76,10 @@ def test_hp_code_logicals_count(rep3_hamming7_matrices):
     """
     Verify that logical operator extraction returns the expected number.
 
-    For repetition(3): k1 = 3 - 2 = 1; for Hamming(7): k2 = 7 - 3 = 4;
-    Hence, the product code should have k1*k2 = 4 logical operators.
+    The hypergraph product formula is k = k1*k2 + k1^T*k2^T, where k^T is
+    the dimension of ker(H^T). Repetition(3) has k1 = 1, k1^T = 0; Hamming(7)
+    has k2 = 4, k2^T = 0. Hence k = 1*4 + 0*0 = 4. (The k1*k2 shortcut only
+    works when both transpose codes are trivial, as in this case.)
     """
     H_rep, H_ham = rep3_hamming7_matrices
     code = HypergraphProductCode(H_rep, H_ham, rounds=1)

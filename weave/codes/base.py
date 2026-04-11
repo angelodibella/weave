@@ -40,6 +40,16 @@ class NoiseModel:
         If any noise parameter has the wrong length, contains negative values,
         or exceeds Stim's probability constraints (PAULI_CHANNEL_1 params sum > 1,
         PAULI_CHANNEL_2 params sum > 1).
+
+    Notes
+    -----
+    The 15-parameter `circuit` and `crossing` channels follow Stim's
+    PAULI_CHANNEL_2 ordering (IX, IY, IZ, XI, XX, ..., ZZ), where the first
+    Pauli factor acts on the first listed qubit. In CSSCode circuits the
+    two-qubit channels are applied as `(data_qubit, ancilla)` for both
+    Z-check and X-check CNOTs, and as `(data_a, data_b)` with `data_a <
+    data_b` for crossings. A symmetric scalar input (the default) is
+    order-invariant; asymmetric 15-lists must follow the convention above.
     """
 
     def __init__(

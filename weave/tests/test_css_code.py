@@ -22,10 +22,11 @@ def steane_code():
 def test_steane_parameters(steane_code):
     """Verify [[7,1,3]] Steane code parameters."""
     assert steane_code.k == 1
+    assert steane_code.n == 7
     assert len(steane_code.data_qubits) == 7
     assert len(steane_code.z_check_qubits) == 3
     assert len(steane_code.x_check_qubits) == 3
-    assert steane_code.n == 13
+    assert steane_code.n_total == 13
 
 
 def test_steane_noiseless_z_memory(steane_code):
@@ -233,3 +234,48 @@ def test_gf2_rank_used_for_k():
     code = CSSCode(HX=H, HZ=H, rounds=1)
     # Hamming(7): rank=3, so k = 7 - 3 - 3 = 1
     assert code.k == 1
+
+
+# ---- Quantum distance ----
+
+def test_steane_distance():
+    """Steane code has quantum distance 3."""
+    H = pcm.hamming(7)
+    code = CSSCode(HX=H, HZ=H, rounds=1)
+    assert code.distance() == 3
+
+
+def test_distance_large_nullspace_raises():
+    """Distance should raise ValueError when nullspace dimension exceeds 20."""
+    # Build a trivial CSS code with empty HX, HZ on many qubits -> huge nullspace.
+    n = 25
+    HX = np.zeros((1, n), dtype=int)  # degenerate stabilizer
+    HZ = np.zeros((1, n), dtype=int)
+    # CSS condition 0 @ 0 = 0 holds trivially.
+    code = CSSCode(HX=HX, HZ=HZ, rounds=1)
+    with pytest.raises(ValueError, match="infeasible"):
+        code.distance()
+
+
+# ---- n vs n_total semantics ----
+
+def test_steane_n_is_data_qubit_count():
+    """CSSCode.n should be the data-qubit count (7 for Steane), not the total circuit size."""
+    H = pcm.hamming(7)
+    code = CSSCode(HX=H, HZ=H, rounds=1)
+    assert code.n == 7
+    assert code.n_total == 13  # 7 data + 3 Z-ancillas + 3 X-ancillas
+    assert code.n == len(code.data_qubits)
+    assert code.n_total == len(code.qubits)
+
+
+# ---- Symplectic Gram-Schmidt defensive check ----
+
+def test_symplectic_gs_raises_on_degenerate_input():
+    """_symplectic_gram_schmidt should raise if no Z anticommutes with some X."""
+    # Construct degenerate input: two X-logicals, zero Z-logicals (no partner).
+    x = np.array([[1, 0], [0, 1]], dtype=int)
+    z = np.array([[1, 0], [1, 0]], dtype=int)  # z[0] and z[1] both commute with x[1]
+    # x[1] = [0,1]; z[0] = [1,0]; dot = 0. z[1] = [1,0]; dot = 0. No partner.
+    with pytest.raises(RuntimeError, match="degenerate"):
+        CSSCode._symplectic_gram_schmidt(x, z)

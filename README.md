@@ -38,6 +38,7 @@ H = pcm.hamming(7)
 code = CSSCode(HX=H, HZ=H)
 
 print(f"[[{code.n}, {code.k}]]")   # [[7, 1]]
+print(code.n_total)                 # 13 — total circuit qubits (7 data + 3 Z-ancillas + 3 X-ancillas)
 print(code.circuit)                 # Stim circuit (noiseless by default)
 ```
 
@@ -63,7 +64,7 @@ from weave import HypergraphProductCode
 H1 = pcm.repetition(3)
 H2 = pcm.repetition(3)
 hp_code = HypergraphProductCode(H1, H2)
-print(f"[[{hp_code.n}, {hp_code.k}]]")  # [[18, 1]]
+print(f"[[{hp_code.n}, {hp_code.k}]]")  # [[13, 1]]
 ```
 
 ### Batch simulation with Sinter
