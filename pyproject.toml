@@ -74,6 +74,9 @@ ignore = [
 # cyclic factors, and functions like `ker_A_basis` that encode the
 # symbol `A` from the paper's polynomial notation.
 "weave/codes/bb/*" = ["N802", "E741"]
+# BB embeddings share the same `l, m` naming for BB parameters.
+"weave/ir/embeddings/column.py" = ["E741"]
+"weave/ir/embeddings/biplanar.py" = ["E741"]
 
 [tool.mypy]
 python_version = "3.10"

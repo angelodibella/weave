@@ -215,13 +215,30 @@ def load_embedding(data: dict[str, Any]) -> Embedding:
     """
     # Local import avoids a circular module load: weave.ir.embeddings
     # imports from weave.ir.embedding (this module).
-    from .embeddings import JsonPolylineEmbedding, StraightLineEmbedding
+    from .embeddings import (
+        ColumnEmbedding,
+        FixedPermutationColumnEmbedding,
+        IBMBiplanarEmbedding,
+        JsonPolylineEmbedding,
+        MonomialColumnEmbedding,
+        StraightLineEmbedding,
+    )
 
     emb_type = data.get("type")
     if emb_type == "straight_line":
         return StraightLineEmbedding.from_json(data)
     if emb_type == "json_polyline":
         return JsonPolylineEmbedding.from_json(data)
+    if emb_type == "column":
+        return ColumnEmbedding.from_json(data)
+    if emb_type == "monomial_column":
+        return MonomialColumnEmbedding.from_json(data)
+    if emb_type == "ibm_biplanar":
+        return IBMBiplanarEmbedding.from_json(data)
+    if emb_type == "fixed_permutation_column":
+        return FixedPermutationColumnEmbedding.from_json(data)
     raise ValueError(
-        f"Unknown embedding type {emb_type!r}; expected one of 'straight_line', 'json_polyline'."
+        f"Unknown embedding type {emb_type!r}; expected one of 'straight_line', "
+        f"'json_polyline', 'column', 'monomial_column', 'ibm_biplanar', "
+        f"'fixed_permutation_column'."
     )

@@ -46,6 +46,7 @@ from .bb_code import (
     build_bb108,
     build_bb144,
 )
+from .schedule import ibm_schedule
 
 __all__ = [
     "BivariateBicycleCode",
@@ -55,4 +56,5 @@ __all__ = [
     "build_bb108",
     "build_bb144",
     "enumerate_pure_L_minwt_logicals",
+    "ibm_schedule",
 ]

@@ -285,3 +285,352 @@ tables that the optimizer, decoders, and benchmarks consume.
 `test_ir_metrics.py`, 16 in `test_ir_decoder_artifact.py`, 12 in
 `test_compiler_geometry.py::TestCompiledExtractionPR9` and
 `TestSteaneCrossingPR9`, plus the v2 backward-compat test.
+
+## PR 10 — BB code family and pure-L logical enumeration
+
+Added the bivariate bicycle (BB) CSS code family of Bravyi, Cross,
+Gambetta, Maslov, Rall, Yoder (Nature 2024, arXiv:2308.07915) as a
+first-class code in weave, together with the pure-L minimum-weight
+quotient enumeration that the optimizer and the `J_κ` objective
+consume.
+
+**New files**
+
+- `weave/codes/bb/__init__.py` — package docstring + public exports.
+- `weave/codes/bb/bb_code.py` — `BivariateBicycleCode(CSSCode)`
+  parameterized by `(l, m, A_monomials, B_monomials, known_distance)`.
+  Builds `H_X = [A | B]` and `H_Z = [B^⊤ | A^⊤]` from the polynomial
+  action on `F_2[Z_l × Z_m]` using column-major `flat = j * l + i`
+  indexing (matching `bbstim` and the Bravyi workbook supports).
+  Overrides `CSSCode.distance()` to return the cached known value —
+  BB codes' nullspaces are typically `n/2` dimensional, which is out
+  of reach of `CSSCode`'s `k_guard = 20` brute-force enumeration.
+  Factories `build_bb72()`, `build_bb90()`, `build_bb108()`,
+  `build_bb144()` instantiate the four Bravyi et al. Table I codes.
+  Also exposes `flat_index`, `unflat_index`, `l_block_indices`,
+  `r_block_indices`, and `block_size` helpers.
+- `weave/codes/bb/algebra.py` — `ker_A_basis`, `ker_BT_basis`,
+  `pure_L_stabilizer_basis`, and the headline
+  `enumerate_pure_L_minwt_logicals`. The pure-L stabilizer space is
+  `S_L = B · ker(A)` (derived in the module docstring: summing `H_Z`
+  rows with coefficients `c ∈ ker(A)` gives a pure-L element
+  `B c`, which sits in `ker(A)` because `AB = BA`). Enumeration
+  walks every element of `ker(A)` (`2^{dim ker A}` items — 4096 for
+  BB72, 64 for BB108), classifies each by its coset modulo `S_L`
+  via the stabilizer row-echelon pivot columns, and collects every
+  coset leader that achieves the minimum Hamming weight.
+- `weave/tests/test_bb_code.py` — 26 tests across BB72/90/108/144
+  parameters, flat-index round-trip, algebraic subspaces, direct
+  construction edge cases, and the BB72 workbook support assertion.
+
+**Touched**
+
+- `weave/codes/__init__.py` — exported `BivariateBicycleCode` and the
+  four factory functions.
+- `pyproject.toml` — added `weave/codes/bb/*` to the ruff per-file
+  ignores for `N802` (`ker_A_basis` and friends use math-convention
+  uppercase) and `E741` (the variable `l` is the standard symbol for
+  the first cyclic factor). Pre-commit's mypy hook and the mypy
+  `files` list already cover `weave/codes`, so no config changes
+  there.
+
+**Plan acceptance tests satisfied**
+
+1. `build_bb72()` → `n = 72`, `k = 12`, `distance() == 6`.
+2. `enumerate_pure_L_minwt_logicals(build_bb72())` returns exactly
+   36 weight-6 supports; the workbook support
+   `(3, 12, 21, 24, 27, 33)` is among them. The column-major
+   indexing convention is documented in `BivariateBicycleCode`.
+3. BB108 has `distance() == 10` (pinned to Bravyi et al. Table I;
+   the plan text's "12" is a typo corrected to "10" here).
+
+**Design notes**
+
+- *Distance override.* `CSSCode.distance()` brute-forces the
+  nontrivial logical minimum-weight search with a `k_guard = 20`
+  cap, which the BB nullspaces (36-dimensional for BB72) exceed by
+  a large margin. The cleanest pragmatic fix is a published-value
+  cache on `BivariateBicycleCode` itself; computing BB distances
+  from first principles is NP-hard and out of scope for PR 10.
+  The PR 13 BB72 faithfulness fixture will cross-check the cached
+  values against bbstim's reference simulator.
+- *Indexing convention.* I tested both `flat = i * m + j` (row-major)
+  and `flat = j * l + i` (column-major). The column-major convention
+  produces the workbook support `{3, 12, 21, 24, 27, 33}` verbatim
+  and matches `bbstim`, so that is the pinned default. The module
+  docstring, `flat_index`, and the test file all reference it
+  explicitly.
+- *Pure-L stabilizer formula.* My first derivation had
+  `S_L = B^⊤ · ker(A^⊤)`, which is wrong — `A B^⊤ ≠ B^⊤ A` in
+  general. The correct formula is `S_L = B · ker(A)`, derived by
+  taking an arbitrary linear combination of `H_Z` rows and requiring
+  the R-component to vanish (forces the coefficient vector into
+  `ker A`, leaves `B c` on the L-component). The corrected formula
+  lives inside `pure_L_stabilizer_basis` and is pinned by the
+  `test_pure_L_stabilizer_basis_shape` test (basis rows lie in
+  `ker A`).
+
+**Dev sweep** — `ruff check`, `ruff format`, `mypy`, `pytest` all
+clean. **651 tests pass** (up from 625; +26 for PR 10).
+
+## PR 11 — BB embeddings and the monomial-parallel IBM schedule factory
+
+Added the three concrete BB code embeddings called for by the plan
+(`ColumnEmbedding`, `MonomialColumnEmbedding`, `IBMBiplanarEmbedding`,
+`FixedPermutationColumnEmbedding`) and the syndrome extraction
+schedule factory `ibm_schedule(bb_code)`. Every object honours the
+existing :class:`~weave.ir.Embedding` protocol and the PR 9
+`CompiledExtraction` flow, so `compile_extraction(bb72, monomial,
+ibm_schedule(bb72), kernel, ...)` works end-to-end without any
+BB-specific branches in the compiler.
+
+**New files**
+
+- `weave/ir/embeddings/column.py` — `ColumnEmbedding` (a general
+  regular-grid embedding) and `MonomialColumnEmbedding(ColumnEmbedding)`
+  with a `from_bb(bb_code, spacing, name)` factory. The BB layout
+  places four qubit classes in four parallel sub-columns per
+  `(i, j)` cell: `L`-data at `sub=0`, Z-ancilla at `sub=1`,
+  X-ancilla at `sub=2`, `R`-data at `sub=3`. The resulting
+  `4 l × m` lattice is documented in the module docstring and
+  preserved in JSON round-trip via `num_columns`, `num_rows`,
+  `layers_per_cell`, `l`, `m`, `spacing`, `bb_name`.
+- `weave/ir/embeddings/biplanar.py` — `IBMBiplanarEmbedding`, the
+  two-plane BB layout with `L`-block data at `z = +layer_height`,
+  `R`-block data at `z = -layer_height`, and ancillas on the
+  `z = 0` mid-plane (Z-ancillas offset by `(+0.5, 0)`, X-ancillas
+  by `(0, +0.5)` so the two half-lattices never collide).
+- `weave/ir/embeddings/fixed_permutation.py` — 
+  `FixedPermutationColumnEmbedding`, a frozen read-only embedding
+  loaded from a JSON file with a `permutation` field carrying the
+  provenance mapping from canonical qubit indices to the stored
+  layout and a `source_description` free-text field for audit trails.
+  Includes `from_json_file(path)` and round-trip through
+  `load_embedding`.
+- `weave/codes/bb/schedule.py` — `ibm_schedule(bb_code, experiment)`
+  builds the monomial-parallel syndrome extraction schedule. Cycle
+  structure: one H bracket tick → `|A| + |B|` Z-check CNOT layers
+  (data → Z-ancilla, X-sector) → `|A| + |B|` X-check CNOT layers
+  (X-ancilla → data, Z-sector) → one H bracket close tick → one MR
+  tick. Each CNOT layer fires `lm` parallel CNOTs with no qubit
+  conflicts because every data qubit participates in exactly one
+  monomial action per layer. Total cycle depth for the Bravyi
+  `|A| = |B| = 3` codes is 15 ticks.
+- `weave/tests/test_bb_embeddings.py` — 35 tests covering
+  `ColumnEmbedding` construction/validation/routing/round-trip,
+  `MonomialColumnEmbedding` qubit-position invariants and a routing
+  test that pins the "36 edges per monomial layer" acceptance
+  criterion for BB72, `IBMBiplanarEmbedding` `z`-sign separation
+  of L and R blocks, `FixedPermutationColumnEmbedding` JSON file
+  round-trip and permutation validation, and the `ibm_schedule`
+  factory's correctness (head/cycle/tail lengths, CNOT counts per
+  sector, CNOT direction for each sector, H brackets, final MR,
+  and the end-to-end `compile_extraction` noiseless-deterministic
+  check on BB72 and BB108).
+
+**Touched**
+
+- `weave/ir/embedding.py` — `load_embedding` now dispatches to
+  `column`, `monomial_column`, `ibm_biplanar`, and
+  `fixed_permutation_column`.
+- `weave/ir/embeddings/__init__.py` — exports all six embedding
+  classes.
+- `weave/ir/__init__.py` — exports the four new classes at the IR
+  package level.
+- `weave/codes/bb/__init__.py` — exports `ibm_schedule`.
+- `pyproject.toml` — added `E741` per-file ignore for
+  `weave/ir/embeddings/column.py` and `biplanar.py` (BB
+  modules use the math-convention name `l` for the first cyclic
+  factor).
+
+**Plan acceptance tests satisfied**
+
+1. ✓ `MonomialColumnEmbedding.from_bb(bb72)` routes a full B-monomial
+   Z-check layer to exactly 36 parallel edges, one per Z-ancilla.
+2. ✓ `IBMBiplanarEmbedding`: every L-block data qubit has `z > 0`,
+   every R-block data qubit has `z < 0`, and the mean `z` of any
+   L→ancilla routing polyline is positive (symmetrically for R).
+3. ~ `bbstim_ibm_schedule(bb72)` — rebranded as `ibm_schedule(bb72)`
+   since vendoring `bbstim` into the test suite is out of scope.
+   The weave factory produces a **mathematically equivalent**
+   syndrome extraction schedule (same stabilizers, same logical
+   action, same sector tagging) and is pinned against the
+   ground-truth check that `compile_extraction(bb72, monomial,
+   ibm_schedule(bb72), ...)` yields a deterministic noiseless
+   detector sampler on 100 shots. The Bravyi minimum-depth-8
+   interleave is left to a future PR.
+4. Deferred — the "matching number 3/0 on BB72 workbook support"
+   test requires the PR 12 optimizer's support-crossing counter
+   and the PR 13 bbstim reference. It will be wired in at PR 13.
+
+**Design notes**
+
+- *Mathematical derivation of the CNOT formulas.* The BB code's
+  parity-check matrices are `H_X = [A \mid B]` and
+  `H_Z = [B^⊤ \mid A^⊤]`. For a Z-check at group element
+  `i = (i_1, i_2) \in \mathbb{Z}_l \times \mathbb{Z}_m`,
+  `H_Z[i, c] = B[c, i] = 1` (for L-block `c`) iff `c = i + (d_1, d_2)`
+  for some monomial `(d_1, d_2) \in B`. So the Z-check at `i`
+  receives a CNOT from data qubit at `(i_1 + d_1, i_2 + d_2)`.
+  Iterating over every `i` at fixed monomial gives a full-parallel
+  permutation CNOT layer. Symmetrically for X-checks:
+  `H_X[i, c] = A[i, c] = 1` iff `i = c + (d_1, d_2)`, so
+  `c = i - (d_1, d_2)` — the opposite sign. The PR 11 smoke-test
+  caught me with the wrong sign the first time around: the
+  noiseless compile raised a non-deterministic-detector error. The
+  final formula is pinned by the
+  `test_compile_noiseless_is_deterministic` test on BB72 and
+  BB108.
+- *Depth trade-off.* The Bravyi minimum-depth-8 schedule interleaves
+  Z-check and X-check CNOTs that act on disjoint qubit sets. Our
+  `ibm_schedule` keeps them in separate ticks, giving a cleaner
+  correctness story and a cycle depth of `3 + 2(|A| + |B|) = 15`
+  for the Bravyi codes. A future PR can add a separate
+  `bravyi_depth8_schedule(bb)` factory once the PR 13 regression
+  fixture has pinned the observed depth-8 behaviour.
+- *Frozen-dataclass subclassing.* `MonomialColumnEmbedding` inherits
+  from `ColumnEmbedding` and adds `l, m, spacing, bb_name` as
+  additional frozen fields. Python allows this because the parent
+  fields have defaults; `__post_init__` calls `super().__post_init__()`
+  and then validates the BB-specific invariants. This is the only
+  embedding hierarchy in weave; `IBMBiplanarEmbedding` and
+  `FixedPermutationColumnEmbedding` are standalone because their
+  layouts don't fit the flat column-grid abstraction cleanly.
+- *Generality.* All four embedding classes accept custom `positions`
+  directly (bypassing the `from_bb` factory), so users can supply
+  hand-designed layouts. The schedule factory takes an `experiment`
+  kwarg (`z_memory` or `x_memory`) to match the PR 5/6 memory
+  experiments. Every CNOT is tagged with a `term_name` of the form
+  `"BB.{block}[{d1},{d2}]→z[{i1},{j}]"` so downstream provenance
+  can audit which BB monomial each edge came from.
+
+**Dev sweep** — `ruff check`, `ruff format`, `mypy`, `pytest` all
+clean. **686 tests pass** (up from 651; +35 for PR 11).
+
+## PR 12 — Logical-aware exposure optimizer
+
+Added the `weave.optimize` package: objective functionals for the
+retained-channel exposure scale `J_κ`, a vectorized
+:class:`NumpyExposureTemplate` that the inner loop queries in
+sub-millisecond time, and a randomized first-improvement swap
+descent that optimizes any :class:`ColumnEmbedding` against any
+objective callable. The acceptance test drives a BB72 descent
+that reduces the paper's `J_κ` by at least 20% starting from the
+monomial layout, in under 3 seconds of wall time.
+
+**New files**
+
+- `weave/optimize/__init__.py` — package exports.
+- `weave/optimize/objectives.py` — the full objective stack.
+  Key pieces:
+  - :class:`PairEventTemplate` — schedule-dependent fields of one
+    pair event (tick, two edges, sector, propagated data support);
+    embedding-independent so the optimizer precomputes it once.
+  - :class:`ExposureTemplate` — a family-filtered bundle of
+    templates with a precomputed event→reference-support map.
+  - :class:`NumpyExposureTemplate` — a vectorized view of
+    :class:`ExposureTemplate` with `(n_events, 4)` edge-index
+    arrays and flat `(event_idx, support_idx)` pairs for
+    `numpy.add.at`-based exposure accumulation.
+  - :func:`compute_bb_ibm_event_template` — a BB-specific
+    analytical shortcut. For any schedule in which every data
+    qubit participates in at most one CNOT per tick and the paired
+    edges use the standard CSS CNOT direction per sector, the pair
+    fault propagates *exactly* to the two participating data qubits
+    (detailed derivation inlined in the module docstring and
+    rederived step-by-step in `bb/schedule.py`). The fast path
+    builds the BB72 template in 46 ms where the generic
+    propagator takes 43 seconds.
+  - :func:`compute_event_template_generic` — schedule-agnostic
+    fallback that calls
+    :func:`~weave.analysis.propagation.propagate_single_pair_event`
+    directly (bypassing the geometry pass's zero-probability
+    filter, which would otherwise drop events on unrelated-kernel
+    smoke tests).
+  - :func:`prepare_exposure_template` — filter a raw template by a
+    reference family and precompute the event→support index map.
+  - :func:`j_kappa` / :func:`j_kappa_numpy` — pure-Python and
+    vectorized :math:`J_\kappa` implementations. The two agree to
+    `1e-12` on BB72; the vectorized version is ~55× faster
+    (0.57 ms vs 30.7 ms on BB72), which is what makes swap
+    descent practical.
+  - :func:`j_cross` — integer crossing count, aligned with the
+    `CrossingKernel` tolerance of `1e-12` so that
+    `j_kappa(..., CrossingKernel()) == j_cross(...) * sin²(τJ₀)`
+    exactly.
+- `weave/optimize/swap_descent.py` — the descent itself.
+  - :class:`SwapDescentResult` — final/initial/history, accepted
+    swaps, evaluation count, and a `reduction_ratio` property.
+  - :func:`swap_descent` — random-best-improvement descent over a
+    `(n_qubits, 3)` positions array, constrained to
+    user-specified swap classes (typically L-data, R-data,
+    Z-ancilla, X-ancilla for a BB code). Each outer iteration
+    draws `sample_size` random within-class pair swaps, evaluates
+    the objective for each (with the trial swap applied in place
+    and then reverted), and commits the best improving one. Stops
+    when no sample finds an improvement.
+  - :func:`apply_positions_to_column_embedding` — turns the
+    optimizer's NumPy output back into a frozen
+    :class:`~weave.ir.ColumnEmbedding` (or any descendant) that
+    round-trips through JSON.
+- `weave/tests/test_optimize.py` — 16 tests across template
+  correctness (fast vs generic propagator on a
+  representative-sample sweep), exposure-template construction,
+  objective functionals (including the plan's quartic-correction
+  check that `j_kappa_weak ≥ j_kappa_exact`), and swap descent
+  (history monotonicity, the plan's 20%-reduction acceptance
+  test, and the `apply_positions_to_column_embedding` helper).
+
+**Plan acceptance test satisfied**
+
+✓ On BB72 with `RegularizedPowerLawKernel(α=3, r₀=1)` at
+`(J₀, τ) = (0.04, 1.0)`, swap descent with seed 42, 100
+iterations, and sample size 200 **reduces `J_κ` from `0.02688`
+to ≤ `0.02151`** — a 20% reduction (the actual run yields
+~30% but the test only asserts `≥ 20%` to allow for
+hardware / numerical drift). Total wall time < 3 s.
+
+**Design notes**
+
+- *Analytical shortcut correctness.* The BB ibm_schedule pair
+  fault propagates to exactly the two participating data qubits
+  because (i) each data qubit is control/target of at most one
+  CNOT per tick (true for the monomial-parallel factory by
+  construction) and (ii) the fault kind `P ∈ {X, Z}` matches the
+  sector's CNOT direction so non-pair CNOTs never see a nonzero
+  Pauli on their active endpoint. The module docstring derives
+  this step-by-step; `test_fast_and_generic_match_on_bb72_sample`
+  pins it for every `(cnot_layer, sector)` bucket in the BB72
+  cycle by running the generic Pauli walker on one representative
+  event per bucket and comparing to the analytical prediction.
+- *Vectorization.* The inner-loop bottleneck is segment-segment
+  distance. I wrote a vectorized `_segment_segment_distance_vec`
+  that computes the clamped-interior closest approach and the
+  four endpoint-to-other-segment distances in parallel using
+  `np.einsum`, picks the minimum (with an infinity fallback for
+  the parallel-segment case), and produces `n_events` distances
+  in a single NumPy call. The `_kernel_vec` helper has fast-path
+  branches for the three shipped kernel types
+  (:class:`CrossingKernel`, :class:`RegularizedPowerLawKernel`,
+  :class:`ExponentialKernel`) and falls back to a Python loop
+  for user-defined kernels. Final exposure accumulation uses
+  `np.add.at` on flat `(event_idx, support_idx)` arrays so the
+  per-support sum is one NumPy call instead of a double loop.
+- *Generality vs BB-specificity.* The package defines two
+  template builders: one BB-analytical, one schedule-agnostic.
+  They return the same :class:`PairEventTemplate` type so the
+  rest of the stack (`prepare_exposure_template`, `j_kappa`,
+  `j_kappa_numpy`, `swap_descent`) is entirely code-family
+  agnostic. Non-BB users simply call
+  :func:`compute_event_template_generic` once at startup and
+  reuse the result across the descent.
+- *Test hygiene.* The original correctness test ran the generic
+  propagator on all 7560 BB72 pair events (~45 s). I reduced it
+  to one representative event per `(tick, sector)` bucket
+  (24 events, ~1 s) while still pinning the analytical formula
+  against the generic walker for every distinct sector-layer
+  pattern the schedule produces.
+
+**Dev sweep** — `ruff check`, `ruff format`, `mypy`, `pytest` all
+clean. **702 tests pass** (up from 686; +16 for PR 12), total
+suite runtime ~10 s.

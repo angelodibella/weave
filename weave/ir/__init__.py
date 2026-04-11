@@ -50,7 +50,14 @@ from .embedding import (
     RoutingGeometry,
     load_embedding,
 )
-from .embeddings import JsonPolylineEmbedding, StraightLineEmbedding
+from .embeddings import (
+    ColumnEmbedding,
+    FixedPermutationColumnEmbedding,
+    IBMBiplanarEmbedding,
+    JsonPolylineEmbedding,
+    MonomialColumnEmbedding,
+    StraightLineEmbedding,
+)
 from .kernel import (
     CrossingKernel,
     ExponentialKernel,
@@ -86,6 +93,7 @@ from .schedule import (
 )
 
 __all__ = [
+    "ColumnEmbedding",
     "CompiledExtraction",
     "CorrelationEdgeRecord",
     "CrossingKernel",
@@ -93,8 +101,10 @@ __all__ = [
     "Embedding",
     "ExponentialKernel",
     "ExposureMetrics",
+    "FixedPermutationColumnEmbedding",
     "GeometryNoiseConfig",
     "GeometryScope",
+    "IBMBiplanarEmbedding",
     "IREdge",
     "IRPolyline",
     "InteractionSector",
@@ -103,6 +113,7 @@ __all__ = [
     "LocalNoise",
     "LocalNoiseConfig",
     "MinDistanceMetric",
+    "MonomialColumnEmbedding",
     "ProvenanceRecord",
     "QubitRole",
     "RegularizedPowerLawKernel",
