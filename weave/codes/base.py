@@ -160,12 +160,18 @@ class QuantumCode(ABC):
     """
     Abstract base class for quantum error-correcting codes.
 
-    This class defines a common interface for all quantum error-correcting code implementations.
+    This class defines a common interface for all quantum error-correcting
+    code implementations. The abstract contract is the `.circuit`
+    property: every subclass must expose a ``stim.Circuit`` that
+    implements one or more rounds of syndrome measurement for the code,
+    optionally with noise and detectors. Subclasses may implement
+    `.circuit` directly or delegate to
+    :func:`weave.compiler.compile_extraction`.
 
     Parameters
     ----------
     n : int
-        The number of physical qubits in the code.
+        The number of data qubits in the code (the `n` in `[[n, k, d]]`).
     k : int
         The number of logical qubits encoded.
     """
@@ -174,14 +180,18 @@ class QuantumCode(ABC):
         self.n = n
         self.k = k
 
+    @property
     @abstractmethod
-    def _generate(self) -> stim.Circuit:
+    def circuit(self) -> stim.Circuit:
         """
-        Generate a circuit to measure the syndrome of the code.
+        Return the Stim circuit that implements syndrome measurement for
+        this code.
 
         Returns
         -------
         stim.Circuit
-            A circuit representation for the syndrome measurement.
+            A circuit representation of the syndrome measurement protocol,
+            including gates, noise (if configured), detectors, and
+            observable declarations.
         """
-        pass
+        ...

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from itertools import combinations
+from typing import Literal, cast
 
 import networkx as nx
 import numpy as np
@@ -103,9 +104,31 @@ class CSSCode(QuantumCode):
 
     @property
     def circuit(self) -> stim.Circuit:
-        """Lazily generate and return the Stim circuit."""
+        """Lazily generate and return the Stim circuit.
+
+        Dispatches between two backends:
+
+        * For **noiseless** codes (every channel in `self.noise` is zero),
+          delegates to :func:`weave.compiler.compile_extraction` — the
+          schedule-aware compiler introduced in PR 5. This path emits
+          `TICK` markers and per-tick idle-noise placement.
+        * For **noisy** codes, falls back to :meth:`_legacy_generate` —
+          the original per-cycle `PAULI_CHANNEL_1` / `PAULI_CHANNEL_2`
+          emission. The new compiler's `LocalNoise` protocol does not
+          yet subsume the full legacy `NoiseModel` semantics
+          (per-qubit-class `PAULI_CHANNEL_1`, the crossing channel),
+          so we preserve bit-exact legacy behavior for noisy tests
+          until PR 8 lands the geometry pass and PR 13 validates
+          faithfulness end-to-end.
+
+        The cache (`self._circuit`) is shared by both backends.
+        :meth:`embed` invalidates it.
+        """
         if self._circuit is None:
-            self._circuit = self._generate()
+            if _noise_is_trivial(self.noise):
+                self._circuit = self._compile_circuit()
+            else:
+                self._circuit = self._legacy_generate()
         return self._circuit
 
     @property
@@ -113,15 +136,80 @@ class CSSCode(QuantumCode):
         """Total number of qubits in the extraction circuit (data + ancillas)."""
         return len(self.qubits)
 
-    def _generate(self) -> stim.Circuit:
+    def _compile_circuit(self) -> stim.Circuit:
+        """Build the Stim circuit via the weave.compiler path.
+
+        Used by :attr:`circuit` when the noise model is trivial. Wires
+        the code, a `StraightLineEmbedding` lifted from `self.pos`
+        (or a trivial linear fallback if `embed` has not been called),
+        a `default_css_schedule` matching the code's `experiment`, and
+        zero local/geometry noise into
+        :func:`weave.compiler.compile_extraction`.
+
+        The result is the live `stim.Circuit` materialized from the
+        compiler's canonical text form.
         """
-        Build a fresh Stim circuit for the code, including stabilizer operations,
-        noise channels, measurement rounds, detectors, and observable inclusions.
+        # Local imports to avoid any import-order surprises: weave.compiler
+        # and weave.ir depend on weave.util / weave.geometry which must all
+        # be loaded before weave.codes.css_code's methods run anyway.
+        from ..compiler import compile_extraction
+        from ..ir import (
+            CrossingKernel,
+            GeometryNoiseConfig,
+            LocalNoiseConfig,
+            StraightLineEmbedding,
+            default_css_schedule,
+        )
+
+        # Build an embedding. When `embed()` has not been called, there are
+        # no positions yet; synthesize a trivial linear layout along the
+        # x-axis. The compiler only uses positions for geometry-induced
+        # noise (PR 8), which is disabled here, so the specific values
+        # don't affect the emitted circuit.
+        if self.pos is not None:
+            embedding = StraightLineEmbedding.from_positions(self.pos)
+        else:
+            embedding = StraightLineEmbedding.from_positions(
+                [(float(i), 0.0) for i in range(self.n_total)]
+            )
+
+        # self.experiment is validated in __init__ to be one of the two
+        # literals, but the stored attribute is typed as `str`; cast for
+        # the compiler's stricter literal signature.
+        experiment = cast(Literal["z_memory", "x_memory"], self.experiment)
+        schedule = default_css_schedule(self, experiment=experiment)
+
+        compiled = compile_extraction(
+            code=self,
+            embedding=embedding,
+            schedule=schedule,
+            kernel=CrossingKernel(),
+            local_noise=LocalNoiseConfig(),
+            geometry_noise=GeometryNoiseConfig(),
+            rounds=self.rounds,
+            experiment=experiment,
+            logical=self.logical,
+        )
+        return compiled.circuit
+
+    def _legacy_generate(self) -> stim.Circuit:
+        """
+        Build a fresh Stim circuit via the original pre-compiler path.
+
+        This is the full legacy implementation, kept alive for noisy
+        codes (which still route through it via :attr:`circuit`'s
+        dispatch) and as a faithfulness reference until PR 20 removes
+        it. **Do not call this directly in new code**; use
+        `code.circuit` or :func:`weave.compiler.compile_extraction`
+        instead.
 
         Returns
         -------
         stim.Circuit
-            The complete Stim circuit.
+            The complete Stim circuit including stabilizer operations,
+            `PAULI_CHANNEL_1` / `PAULI_CHANNEL_2` noise channels, crossing
+            noise injection, measurement rounds, detectors, and
+            observable inclusions.
         """
         c = stim.Circuit()
 
@@ -505,6 +593,26 @@ def _validate_binary_matrix(matrix: np.ndarray, name: str) -> None:
         raise ValueError(f"{name} must be 2D, got {matrix.ndim}D.")
     if not np.all(np.isin(matrix, [0, 1])):
         raise ValueError(f"{name} must be binary (contain only 0s and 1s).")
+
+
+def _noise_is_trivial(noise: NoiseModel) -> bool:
+    """True iff every channel in `noise` has all-zero probabilities.
+
+    Used by :attr:`CSSCode.circuit` to dispatch between the new
+    schedule-aware compiler (for noiseless codes) and the legacy
+    per-cycle `PAULI_CHANNEL_*` generator (for noisy codes). The
+    dispatch is a bridge for PR 6 while the compiler's `LocalNoise`
+    protocol still lacks per-qubit-class and crossing-channel
+    emission; it will be removed in PR 20 after PR 13 validates
+    compiler faithfulness end-to-end.
+    """
+    return (
+        all(v == 0 for v in noise.data)
+        and all(v == 0 for v in noise.z_check)
+        and all(v == 0 for v in noise.x_check)
+        and all(v == 0 for v in noise.circuit)
+        and all(v == 0 for v in noise.crossing)
+    )
 
 
 def _crossing_qubit_pair(

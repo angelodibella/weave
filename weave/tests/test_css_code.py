@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import stim
 
 from weave.codes.base import NoiseModel
 from weave.codes.css_code import CSSCode
@@ -288,3 +289,109 @@ def test_symplectic_gs_raises_on_degenerate_input():
     # x[1] = [0,1]; z[0] = [1,0]; dot = 0. z[1] = [1,0]; dot = 0. No partner.
     with pytest.raises(RuntimeError, match="degenerate"):
         CSSCode._symplectic_gram_schmidt(x, z)
+
+
+# =============================================================================
+# PR 6: CSSCode.circuit dispatch between compiler and legacy path
+# =============================================================================
+
+
+class TestCircuitDispatchPR6:
+    """Verify `CSSCode.circuit` dispatches correctly between the new
+    `weave.compiler` path (for noiseless codes) and the legacy
+    `_legacy_generate` path (for noisy codes).
+
+    The two paths emit different Stim instructions: the compiler emits
+    `TICK` markers and `DEPOLARIZE1`/`DEPOLARIZE2` channels; the legacy
+    path emits no `TICK` and uses `PAULI_CHANNEL_1`/`PAULI_CHANNEL_2`.
+    We use these as cheap fingerprints to confirm the dispatch.
+
+    When PR 20 retires `_legacy_generate`, these tests should be removed
+    or rewritten to only assert compiler behavior.
+    """
+
+    def test_noiseless_uses_compiler_path(self):
+        """A noiseless code's circuit should come from compile_extraction
+        and therefore contain TICK markers."""
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=3)
+        text = str(code.circuit)
+        assert "TICK" in text, "noiseless path should emit TICK markers"
+
+    def test_noisy_uses_legacy_path(self):
+        """A code with nontrivial noise should route through the legacy
+        generator and therefore emit PAULI_CHANNEL_1 (not DEPOLARIZE1)
+        with no TICK markers."""
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=3, noise=NoiseModel(data=0.001, circuit=0.001))
+        text = str(code.circuit)
+        assert "PAULI_CHANNEL_1" in text, "legacy path emits PAULI_CHANNEL_1"
+        assert "TICK" not in text, "legacy path does not emit TICK"
+
+    def test_noisy_crossing_uses_legacy_path(self):
+        """A code with crossing noise also routes to legacy, since the
+        new compiler's geometry pass (PR 8) is not yet implemented."""
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=1, noise=NoiseModel(crossing=0.15))
+        code.embed("spring", seed=42)
+        text = str(code.circuit)
+        assert "PAULI_CHANNEL_2" in text
+        assert "TICK" not in text
+
+    def test_legacy_generate_still_callable(self):
+        """`_legacy_generate()` remains a private but callable method
+        for direct use in tests that want the legacy path explicitly.
+        """
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=2)
+        legacy_circuit = code._legacy_generate()
+        assert isinstance(legacy_circuit, stim.Circuit)
+        assert "TICK" not in str(legacy_circuit)
+        # Legacy is also noise-free here (default NoiseModel), so its
+        # detector sampler should produce zero events.
+        sampler = legacy_circuit.compile_detector_sampler()
+        samples = sampler.sample(shots=100)
+        assert not np.any(samples)
+
+    def test_dispatch_cache_invalidation_on_embed(self):
+        """The dispatch still respects the lazy-cache invalidation on embed.
+
+        For a noiseless code, the cache is populated by the compiler path,
+        then invalidated by embed(), then repopulated by the compiler path
+        again (with the new `pos` field). Both accesses must produce
+        circuits with zero detector events.
+        """
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=1)
+
+        # First access: compiler path, trivial positions.
+        c1 = code.circuit
+        assert "TICK" in str(c1)
+        assert not np.any(c1.compile_detector_sampler().sample(shots=100))
+
+        # embed() invalidates the cache.
+        code.embed("random", seed=42)
+        assert code._circuit is None
+
+        # Second access: compiler path, positions from embed().
+        c2 = code.circuit
+        assert "TICK" in str(c2)
+        assert not np.any(c2.compile_detector_sampler().sample(shots=100))
+
+    def test_quantumcode_circuit_is_abstract(self):
+        """`QuantumCode` declares `circuit` abstract; direct instantiation
+        must be rejected. `CSSCode` satisfies the abstract contract via
+        its property."""
+        from weave.codes.base import QuantumCode
+
+        # Can't instantiate QuantumCode directly.
+        with pytest.raises(TypeError, match="abstract"):
+            QuantumCode(n=1, k=1)  # type: ignore[abstract]
+
+        # CSSCode satisfies the contract.
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=1)
+        assert hasattr(code, "circuit")
+        import stim
+
+        assert isinstance(code.circuit, stim.Circuit)
