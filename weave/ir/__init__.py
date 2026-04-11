@@ -41,6 +41,7 @@ Schedule
     :func:`default_css_schedule`.
 """
 
+from .compiled import CompiledExtraction
 from .embedding import (
     Embedding,
     IREdge,
@@ -56,7 +57,12 @@ from .kernel import (
     RegularizedPowerLawKernel,
     load_kernel,
 )
-from .noise import GeometryNoiseConfig, GeometryScope, LocalNoiseConfig
+from .noise import (
+    GeometryNoiseConfig,
+    GeometryScope,
+    LocalNoise,
+    LocalNoiseConfig,
+)
 from .route import RouteID, route_id_sort_key
 from .route_metric import MinDistanceMetric, RoutePairMetric, load_route_metric
 from .schedule import (
@@ -72,6 +78,7 @@ from .schedule import (
 )
 
 __all__ = [
+    "CompiledExtraction",
     "CrossingKernel",
     "Embedding",
     "ExponentialKernel",
@@ -82,6 +89,7 @@ __all__ = [
     "InteractionSector",
     "JsonPolylineEmbedding",
     "Kernel",
+    "LocalNoise",
     "LocalNoiseConfig",
     "MinDistanceMetric",
     "QubitRole",

@@ -23,7 +23,7 @@ repos:
     rev: v1.13.0
     hooks:
       - id: mypy
-        files: ^weave/(codes|util|surface|geometry|ir)/
+        files: ^weave/(codes|util|surface|geometry|ir|compiler)/
         additional_dependencies:
           - numpy>=2.0
           - networkx>=3.4

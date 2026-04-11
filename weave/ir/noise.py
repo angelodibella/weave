@@ -16,7 +16,51 @@ class-level `SCHEMA_VERSION`, and full JSON round-trip.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .schedule import ScheduleStep, TwoQubitEdge
+
+
+@runtime_checkable
+class LocalNoise(Protocol):
+    """Structural type for a local-noise model queried by the compiler.
+
+    Any object with `cnot_rate`, `idle_rate`, `prep_rate`, `meas_rate`,
+    and `to_json` methods satisfies this protocol.
+    :class:`LocalNoiseConfig` is the scalar-uniform implementation
+    shipped with v1; richer per-qubit, per-edge, or duration-aware
+    implementations can be plugged in later without changing the
+    compiler's public API.
+
+    Notes
+    -----
+    The `edge` and `step` parameters give implementations the full
+    context of the gate being queried, but uniform implementations are
+    free to ignore them. The compiler queries this protocol once per
+    gate / idle qubit / prep / meas operation during the schedule walk.
+    """
+
+    def cnot_rate(self, edge: TwoQubitEdge, step: ScheduleStep) -> float:
+        """Two-qubit depolarizing rate for a CNOT at this tick."""
+        ...
+
+    def idle_rate(self, qubit: int, step: ScheduleStep) -> float:
+        """Single-qubit depolarizing rate for an idle qubit at this tick."""
+        ...
+
+    def prep_rate(self, qubit: int, step: ScheduleStep) -> float:
+        """Prep-error probability for a qubit being reset at this tick."""
+        ...
+
+    def meas_rate(self, qubit: int, step: ScheduleStep) -> float:
+        """Measurement-error probability for a qubit being measured at this tick."""
+        ...
+
+    def to_json(self) -> dict[str, Any]:
+        """Serialize to a JSON-compatible dict."""
+        ...
+
 
 GeometryScope = Literal["theory_reduced", "full_cycle"]
 """Sector scope for geometry-induced noise insertion.
@@ -75,6 +119,28 @@ class LocalNoiseConfig:
     @property
     def schema_version(self) -> int:
         return self.SCHEMA_VERSION
+
+    # ------------------------------------------------------------------
+    # LocalNoise protocol implementation
+    # ------------------------------------------------------------------
+    # Scalar-uniform: every gate of the same kind has the same rate,
+    # regardless of which edge / qubit / step is being queried.
+
+    def cnot_rate(self, edge: TwoQubitEdge, step: ScheduleStep) -> float:
+        return self.p_cnot
+
+    def idle_rate(self, qubit: int, step: ScheduleStep) -> float:
+        return self.p_idle
+
+    def prep_rate(self, qubit: int, step: ScheduleStep) -> float:
+        return self.p_prep
+
+    def meas_rate(self, qubit: int, step: ScheduleStep) -> float:
+        return self.p_meas
+
+    # ------------------------------------------------------------------
+    # JSON serialization
+    # ------------------------------------------------------------------
 
     def to_json(self) -> dict[str, Any]:
         return {
