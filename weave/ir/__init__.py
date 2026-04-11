@@ -42,6 +42,7 @@ Schedule
 """
 
 from .compiled import CompiledExtraction, ProvenanceRecord
+from .decoder_artifact import DecoderArtifact, build_decoder_artifact
 from .embedding import (
     Embedding,
     IREdge,
@@ -56,6 +57,13 @@ from .kernel import (
     Kernel,
     RegularizedPowerLawKernel,
     load_kernel,
+)
+from .metrics import (
+    CorrelationEdgeRecord,
+    ExposureMetrics,
+    SupportExposureRecord,
+    build_correlation_edges,
+    build_exposure_metrics,
 )
 from .noise import (
     GeometryNoiseConfig,
@@ -79,9 +87,12 @@ from .schedule import (
 
 __all__ = [
     "CompiledExtraction",
+    "CorrelationEdgeRecord",
     "CrossingKernel",
+    "DecoderArtifact",
     "Embedding",
     "ExponentialKernel",
+    "ExposureMetrics",
     "GeometryNoiseConfig",
     "GeometryScope",
     "IREdge",
@@ -104,7 +115,11 @@ __all__ = [
     "ScheduleStep",
     "SingleQubitEdge",
     "StraightLineEmbedding",
+    "SupportExposureRecord",
     "TwoQubitEdge",
+    "build_correlation_edges",
+    "build_decoder_artifact",
+    "build_exposure_metrics",
     "default_css_schedule",
     "load_embedding",
     "load_kernel",

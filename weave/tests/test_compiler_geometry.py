@@ -38,6 +38,10 @@ from weave.codes.css_code import CSSCode
 from weave.compiler import compile_extraction
 from weave.compiler.geometry_pass import compute_provenance
 from weave.ir import (
+    CompiledExtraction,
+    CorrelationEdgeRecord,
+    DecoderArtifact,
+    ExposureMetrics,
     GeometryNoiseConfig,
     LocalNoiseConfig,
     MinDistanceMetric,
@@ -52,6 +56,7 @@ from weave.ir import (
     default_css_schedule,
 )
 from weave.ir.schedule import QubitRole, ScheduleRole
+from weave.util import pcm
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -568,8 +573,6 @@ def test_compiled_extraction_round_trip_with_provenance(
 def test_v1_compiled_extraction_loads_with_empty_provenance():
     """Schema v1 records have no `provenance` field; from_json must
     fall back to an empty tuple rather than raise."""
-    from weave.ir import CompiledExtraction
-
     v1_data = {
         "schema_version": 1,
         "type": "compiled_extraction",
@@ -585,3 +588,425 @@ def test_v1_compiled_extraction_loads_with_empty_provenance():
     }
     ce = CompiledExtraction.from_json(v1_data)
     assert ce.provenance == ()
+    assert ce.correlation_edges == ()
+    assert ce.exposure_metrics is None
+    assert ce.decoder_artifact is None
+
+
+def test_v2_compiled_extraction_loads_with_empty_correlation_fields():
+    """Schema v2 records have `provenance` but no PR 9 tables; the
+    new fields default to empty/None on load."""
+    v2_data = {
+        "schema_version": 2,
+        "type": "compiled_extraction",
+        "circuit_text": "",
+        "dem_text": "",
+        "code_fingerprint": "a" * 64,
+        "embedding_spec": {},
+        "schedule_spec": {},
+        "kernel_spec": {},
+        "route_metric_spec": {},
+        "local_noise_spec": {},
+        "geometry_noise_spec": {},
+        "provenance": [],
+    }
+    ce = CompiledExtraction.from_json(v2_data)
+    assert ce.provenance == ()
+    assert ce.correlation_edges == ()
+    assert ce.exposure_metrics is None
+    assert ce.decoder_artifact is None
+
+
+# ---------------------------------------------------------------------------
+# PR 9 — CompiledExtraction tables, fingerprint, lazy materializers
+# ---------------------------------------------------------------------------
+
+
+class TestCompiledExtractionPR9:
+    """Acceptance tests for PR 9: correlation edges, exposure metrics,
+    decoder artifact, fingerprint, and lazy materializers.
+    """
+
+    def _compile(self, parallel_code, parallel_schedule, parallel_embedding, *, rounds=1):
+        return compile_extraction(
+            code=parallel_code,
+            embedding=parallel_embedding,
+            schedule=parallel_schedule,
+            kernel=RegularizedPowerLawKernel(alpha=1.0, r0=1.0),
+            route_metric=MinDistanceMetric(),
+            local_noise=LocalNoiseConfig(),
+            geometry_noise=GeometryNoiseConfig(J0=0.5, tau=1.0),
+            rounds=rounds,
+        )
+
+    def test_correlation_edges_populated(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """One pair event at tick 0 between (0, 4) and (2, 5) in the
+        X sector produces exactly one correlation edge between data
+        qubits 0 and 2 with `weight == sin²(0.25)`."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert len(compiled.correlation_edges) == 1
+        edge = compiled.correlation_edges[0]
+        assert isinstance(edge, CorrelationEdgeRecord)
+        assert edge.qubit_a == 0
+        assert edge.qubit_b == 2
+        assert edge.sector == "X"
+        assert edge.weight == pytest.approx(math.sin(0.25) ** 2, abs=1e-12)
+
+    def test_exposure_total_matches_sum_of_probabilities(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """Plan acceptance test #2: ExposureMetrics.total() equals
+        sum(pair_probability) over provenance to 1e-12."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert isinstance(compiled.exposure_metrics, ExposureMetrics)
+        expected = sum(r.pair_probability for r in compiled.provenance)
+        assert compiled.exposure_metrics.total() == pytest.approx(expected, abs=1e-12)
+
+    def test_per_data_pair_matches_correlation_edge(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """The exposure metrics' `per_data_pair` row must match the
+        correlation-edge table row-for-row (modulo the sector column
+        that correlation_edges adds)."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert compiled.exposure_metrics is not None
+        assert len(compiled.exposure_metrics.per_data_pair) == len(compiled.correlation_edges)
+        for (qa, qb, exposure), edge in zip(
+            compiled.exposure_metrics.per_data_pair,
+            compiled.correlation_edges,
+            strict=True,
+        ):
+            assert (qa, qb) == (edge.qubit_a, edge.qubit_b)
+            assert exposure == pytest.approx(edge.weight, abs=1e-12)
+
+    def test_per_support_uses_decoded_sector_logicals(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """k = 0 for the parallel fixture, so `per_support` is empty —
+        but the field is still populated (as an empty tuple), not None."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert compiled.exposure_metrics is not None
+        assert compiled.exposure_metrics.per_support == ()
+
+    def test_decoder_artifact_populated(self, parallel_code, parallel_schedule, parallel_embedding):
+        """The artifact carries one pair edge, a per-data-qubit
+        zero-prior of the right length, and the default hint."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert isinstance(compiled.decoder_artifact, DecoderArtifact)
+        assert len(compiled.decoder_artifact.pair_edges) == 1
+        qa, qb, weight = compiled.decoder_artifact.pair_edges[0]
+        assert (qa, qb) == (0, 2)
+        assert weight == pytest.approx(math.sin(0.25) ** 2, abs=1e-12)
+        assert compiled.decoder_artifact.single_prior == (0.0,) * 4
+        assert compiled.decoder_artifact.decoder_hint == ""
+
+    def test_fingerprint_deterministic(self, parallel_code, parallel_schedule, parallel_embedding):
+        """Plan acceptance test #5: two compiles of the same inputs
+        produce the same SHA256 fingerprint."""
+        a = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        b = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert a.fingerprint() == b.fingerprint()
+        # And the fingerprint is hex-encoded SHA256.
+        assert len(a.fingerprint()) == 64
+        int(a.fingerprint(), 16)  # raises if not hex
+
+    def test_round_trip_preserves_tables(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """Plan acceptance test #4: to_json / from_json round-trip
+        gives a deep-equal object."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        data = compiled.to_json()
+        reconstructed = CompiledExtraction.from_json(data)
+        assert reconstructed.provenance == compiled.provenance
+        assert reconstructed.correlation_edges == compiled.correlation_edges
+        assert reconstructed.exposure_metrics == compiled.exposure_metrics
+        assert reconstructed.decoder_artifact == compiled.decoder_artifact
+        # Full pure-data equality includes circuit_text + specs.
+        assert reconstructed == compiled
+
+    def test_fingerprint_round_trips(self, parallel_code, parallel_schedule, parallel_embedding):
+        """The fingerprint of the round-tripped object matches the
+        original. This ties `fingerprint` stability to JSON fidelity."""
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        reconstructed = CompiledExtraction.from_json(compiled.to_json())
+        assert reconstructed.fingerprint() == compiled.fingerprint()
+
+    def test_lazy_circuit_matches_circuit_text(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """Plan acceptance test #6: `compiled.circuit` materializes to
+        a Stim circuit whose `str()` is byte-identical to
+        `circuit_text`.
+
+        Subtlety: the *in-process* `compiled.circuit` is the exact
+        `stim.Circuit` the compiler built (with full float precision),
+        so `str()` on it matches `circuit_text` directly. After a
+        JSON round-trip the cache is empty, and `circuit` re-parses
+        the (lossy) text — but `str(reparsed)` still matches the text
+        exactly because Stim's text form is idempotent.
+        """
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        assert str(compiled.circuit) == compiled.circuit_text
+        assert str(compiled.dem) == compiled.dem_text
+
+        # After round-trip, still holds.
+        reconstructed = CompiledExtraction.from_json(compiled.to_json())
+        assert str(reconstructed.circuit) == reconstructed.circuit_text
+        assert str(reconstructed.dem) == reconstructed.dem_text
+
+    def test_correlation_graph_is_networkx_graph(
+        self, parallel_code, parallel_schedule, parallel_embedding
+    ):
+        """The lazy `correlation_graph` property builds a NetworkX
+        graph with one node per distinct qubit and one edge per
+        correlation record."""
+        import networkx as nx
+
+        compiled = self._compile(parallel_code, parallel_schedule, parallel_embedding)
+        g = compiled.correlation_graph
+        assert isinstance(g, nx.Graph)
+        assert g.number_of_edges() == 1
+        assert g.has_edge(0, 2)
+        assert g.edges[0, 2]["weight"] == pytest.approx(math.sin(0.25) ** 2, abs=1e-12)
+        assert g.edges[0, 2]["sectors"] == {"X"}
+
+
+# ---------------------------------------------------------------------------
+# PR 9 — Steane crossing acceptance test
+# ---------------------------------------------------------------------------
+
+
+class TestSteaneCrossingPR9:
+    """Plan acceptance test #1: a Steane-derived fixture with a
+    hand-crafted parallel pair produces exactly one correlation edge
+    with the expected weight.
+
+    Since `default_css_schedule(steane)` is serial, we construct a
+    minimal parallel schedule over the Steane qubit layout and a
+    custom embedding that places two specific CNOT polylines at a
+    known distance. This test is the geometry-pipeline equivalent
+    of the `test_single_pair_event_numerics` unit test but runs
+    through the full `compile_extraction` pipeline on a real code
+    (the [[7, 1, 3]] Steane code).
+    """
+
+    def _build(self):
+        H = pcm.hamming(7)
+        code = CSSCode(HX=H, HZ=H, rounds=1)
+        data = code.data_qubits
+        z_checks = code.z_check_qubits
+        x_checks = code.x_check_qubits
+        all_qubits = frozenset(code.qubits)
+
+        roles: dict[int, QubitRole] = {}
+        for q in data:
+            roles[q] = "data"
+        for q in z_checks:
+            roles[q] = "z_ancilla"
+        for q in x_checks:
+            roles[q] = "x_ancilla"
+
+        head = [
+            _make_step(
+                tick=0,
+                role="reset",
+                edges=[SingleQubitEdge(gate="R", qubit=q) for q in sorted(all_qubits)],
+                all_qubits=all_qubits,
+            )
+        ]
+
+        # Parallel pair at cycle tick 0: the first CNOT of Z-check 0
+        # (data[0] → z_checks[0]) and the first CNOT of Z-check 1
+        # (data[3] → z_checks[1]). Picking columns HZ[0,0]=1 and
+        # HZ[1,3]=1 ensures both rows have an X-sector CNOT here.
+        # Remaining CNOTs from default_css_schedule are appended
+        # serially. This makes the schedule lossy w.r.t. full stabilizer
+        # extraction but keeps the invariants compile_extraction relies
+        # on (one MR at the end, final data M in the tail).
+        cycle: list[ScheduleStep] = []
+        cycle.append(
+            _make_step(
+                tick=0,
+                role="cnot_layer",
+                edges=[
+                    TwoQubitEdge(
+                        gate="CNOT",
+                        control=data[0],
+                        target=z_checks[0],
+                        interaction_sector="X",
+                        term_name="HZ[0,0]",
+                    ),
+                    TwoQubitEdge(
+                        gate="CNOT",
+                        control=data[3],
+                        target=z_checks[1],
+                        interaction_sector="X",
+                        term_name="HZ[1,3]",
+                    ),
+                ],
+                all_qubits=all_qubits,
+            )
+        )
+
+        # Serial Z-check CNOTs for the rest.
+        tick = 1
+        for check_idx, target in enumerate(z_checks):
+            row = H[check_idx]
+            for col_idx in range(len(row)):
+                if not row[col_idx]:
+                    continue
+                data_q = data[col_idx]
+                # Skip the two CNOTs already emitted at tick 0.
+                if (check_idx, col_idx) in {(0, 0), (1, 3)}:
+                    continue
+                cycle.append(
+                    _make_step(
+                        tick=tick,
+                        role="cnot_layer",
+                        edges=[
+                            TwoQubitEdge(
+                                gate="CNOT",
+                                control=data_q,
+                                target=target,
+                                interaction_sector="X",
+                                term_name=f"HZ[{check_idx},{col_idx}]",
+                            )
+                        ],
+                        all_qubits=all_qubits,
+                    )
+                )
+                tick += 1
+        # X-check brackets, serial.
+        for check_idx, target in enumerate(x_checks):
+            cycle.append(
+                _make_step(
+                    tick=tick,
+                    role="single_q",
+                    edges=[SingleQubitEdge(gate="H", qubit=target)],
+                    all_qubits=all_qubits,
+                )
+            )
+            tick += 1
+            row = H[check_idx]
+            for col_idx in range(len(row)):
+                if not row[col_idx]:
+                    continue
+                data_q = data[col_idx]
+                cycle.append(
+                    _make_step(
+                        tick=tick,
+                        role="cnot_layer",
+                        edges=[
+                            TwoQubitEdge(
+                                gate="CNOT",
+                                control=target,
+                                target=data_q,
+                                interaction_sector="Z",
+                                term_name=f"HX[{check_idx},{col_idx}]",
+                            )
+                        ],
+                        all_qubits=all_qubits,
+                    )
+                )
+                tick += 1
+            cycle.append(
+                _make_step(
+                    tick=tick,
+                    role="single_q",
+                    edges=[SingleQubitEdge(gate="H", qubit=target)],
+                    all_qubits=all_qubits,
+                )
+            )
+            tick += 1
+        cycle.append(
+            _make_step(
+                tick=tick,
+                role="meas",
+                edges=[SingleQubitEdge(gate="MR", qubit=q) for q in z_checks + x_checks],
+                all_qubits=all_qubits,
+            )
+        )
+
+        tail = [
+            _make_step(
+                tick=0,
+                role="meas",
+                edges=[SingleQubitEdge(gate="M", qubit=q) for q in data],
+                all_qubits=all_qubits,
+            )
+        ]
+
+        schedule = Schedule(
+            head_steps=tuple(head),
+            cycle_steps=tuple(cycle),
+            tail_steps=tuple(tail),
+            qubits=all_qubits,
+            qubit_roles=roles,
+            name="steane_forced_crossing",
+        )
+
+        # Embedding: place the two pair-tick CNOT endpoints so that
+        # their polylines are at unit distance. Other qubits far away.
+        num_qubits = len(code.qubits)
+        positions: list[tuple[float, float]] = [(0.0, 0.0)] * num_qubits
+        positions[data[0]] = (0.0, 0.0)
+        positions[z_checks[0]] = (0.0, 1.0)
+        positions[data[3]] = (1.0, 0.0)
+        positions[z_checks[1]] = (1.0, 1.0)
+        # Park the rest far away.
+        park_x = 100.0
+        for i, q in enumerate(code.qubits):
+            if positions[q] == (0.0, 0.0) and q not in (data[0],):
+                positions[q] = (park_x + 3.0 * i, -50.0)
+        embedding = StraightLineEmbedding.from_positions(positions)
+
+        return code, schedule, embedding
+
+    def test_exactly_one_correlation_edge_with_expected_weight(self):
+        code, schedule, embedding = self._build()
+        compiled = compile_extraction(
+            code=code,
+            embedding=embedding,
+            schedule=schedule,
+            kernel=RegularizedPowerLawKernel(alpha=1.0, r0=1.0),
+            route_metric=MinDistanceMetric(),
+            local_noise=LocalNoiseConfig(),
+            geometry_noise=GeometryNoiseConfig(J0=0.5, tau=1.0),
+            rounds=1,
+        )
+        # Exactly one correlation edge, between data qubits 0 and 3.
+        assert len(compiled.correlation_edges) == 1
+        edge = compiled.correlation_edges[0]
+        assert edge.sector == "X"
+        assert {edge.qubit_a, edge.qubit_b} == {code.data_qubits[0], code.data_qubits[3]}
+        assert edge.weight == pytest.approx(math.sin(0.25) ** 2, abs=1e-12)
+
+    def test_exposure_metrics_match_correlation(self):
+        code, schedule, embedding = self._build()
+        compiled = compile_extraction(
+            code=code,
+            embedding=embedding,
+            schedule=schedule,
+            kernel=RegularizedPowerLawKernel(alpha=1.0, r0=1.0),
+            route_metric=MinDistanceMetric(),
+            local_noise=LocalNoiseConfig(),
+            geometry_noise=GeometryNoiseConfig(J0=0.5, tau=1.0),
+            rounds=1,
+        )
+        assert compiled.exposure_metrics is not None
+        assert compiled.exposure_metrics.total() == pytest.approx(math.sin(0.25) ** 2, abs=1e-12)
+        # Steane has k=1, so per_support has one entry.
+        assert len(compiled.exposure_metrics.per_support) == 1
+        # The forced pair acts on data qubits 0 and 3. Its exposure
+        # contribution to a given Z-logical support depends on whether
+        # both 0 and 3 are in the support.
+        support_rec = compiled.exposure_metrics.per_support[0]
+        data_indices_in_support = {
+            i for i, q in enumerate(code.data_qubits) if q in support_rec.support
+        }
+        contributes = {0, 3}.issubset(data_indices_in_support)
+        expected_exposure = math.sin(0.25) ** 2 if contributes else 0.0
+        assert support_rec.exposure == pytest.approx(expected_exposure, abs=1e-12)

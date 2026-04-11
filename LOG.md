@@ -192,3 +192,96 @@ count, multi-round scaling, exact probability preservation,
 determinism, and zero-`J0` fallback; plus JSON round-trip tests for
 both `ProvenanceRecord` and the new schema-v2 `CompiledExtraction`
 (with v1 backward-compat).
+
+## PR 9 — `ExposureMetrics`, correlation edges, `DecoderArtifact`, `CompiledExtraction` finalization
+
+Finished the `CompiledExtraction` output bundle as pure-data tables.
+Every provenance record produced by PR 8 now feeds three aggregate
+tables that the optimizer, decoders, and benchmarks consume.
+
+**New files**
+
+- `weave/ir/metrics.py` — `SupportExposureRecord`, `CorrelationEdgeRecord`,
+  and `ExposureMetrics` with the four-way decomposition
+  (`per_support`, `per_tick`, `per_route_pair`, `per_data_pair`) plus
+  `total()`, `by_logical(i)`, and `max_over_family(family)` queries.
+  Also the two builder functions `build_correlation_edges` and
+  `build_exposure_metrics` that aggregate a provenance list into the
+  canonical tables. Exposure semantics pinned in the module docstring:
+  `ℰ(L) = Σ rec.pair_probability for rec with data_support ⊆ L`.
+- `weave/ir/decoder_artifact.py` — `DecoderArtifact` shell with
+  `pair_edges`, `single_prior`, `decoder_hint`; `build_decoder_artifact`
+  sums weight-2 pair events sector-merged. The adapter methods
+  (`to_pymatching_hint`, `to_bposd_dem`) are deferred to PR 17.
+- `weave/tests/test_ir_metrics.py` — 29 tests covering construction,
+  aggregation, the `max_over_family` J_κ query, and JSON round-trip.
+- `weave/tests/test_ir_decoder_artifact.py` — 16 tests covering
+  validation, sector-merged aggregation, and round-trip.
+
+**Touched**
+
+- `weave/ir/compiled.py` — bumped `SCHEMA_VERSION` 2 → 3. Added
+  `correlation_edges`, `exposure_metrics`, `decoder_artifact` fields
+  with backward-compat defaults. Added a lazy `correlation_graph`
+  NetworkX materializer cached alongside `circuit`/`dem`. Extended
+  `to_json`/`from_json` to round-trip the new tables and fall back
+  gracefully for schema v1 and v2 artifacts.
+- `weave/ir/route.py` — added `RouteID.to_json` / `from_json` (needed
+  by `ExposureMetrics.per_route_pair` serialization).
+- `weave/ir/__init__.py` — exported `CorrelationEdgeRecord`,
+  `DecoderArtifact`, `ExposureMetrics`, `SupportExposureRecord`, and
+  the three `build_*` helpers.
+- `weave/compiler/compile.py` — after the geometry pass, the
+  compiler now calls `build_correlation_edges`, `build_exposure_metrics`
+  (with `_code_logical_supports(code, experiment)`), and
+  `build_decoder_artifact`, and attaches all three to the returned
+  `CompiledExtraction`. Switched `detector_error_model(...)` to the
+  undecomposed BP+OSD-friendly form when `provenance` is non-empty —
+  correlated multi-qubit errors typically flip ≥3 detectors and
+  defeat graphlike decomposition, so PR 9 routes them through BP+OSD
+  while leaving the PR 5 pure-local-noise path on the matching DEM.
+- `weave/tests/test_ir_compiled.py` — updated `schema_version == 2`
+  pins to `== 3`.
+- `weave/tests/test_compiler_geometry.py` — added `TestCompiledExtractionPR9`
+  (10 tests) covering correlation-edge population, exposure total
+  matching sum of provenance probabilities to 1e-12, per-data-pair
+  alignment with correlation edges, per-support population,
+  decoder-artifact population, fingerprint determinism, deep JSON
+  round-trip of all tables, fingerprint stability across round-trip,
+  lazy `circuit`/`dem` text equality, and the NetworkX correlation
+  graph. Also added `TestSteaneCrossingPR9` (2 tests) with a
+  hand-crafted Steane schedule that forces a single parallel X-sector
+  pair between data qubits 0 and 3, verifying plan acceptance test #1
+  (exactly one correlation edge with the expected `sin²(τJ₀κ)` weight).
+- `weave/tests/test_compiler_geometry.py` — added a v2
+  backward-compat test (`test_v2_compiled_extraction_loads_with_empty_correlation_fields`)
+  that mirrors the existing v1 test.
+
+**Design notes**
+
+- *Exposure semantics.* `per_support[L].exposure = Σ_{rec : data_support ⊆ L} pair_probability`.
+  The tight "subset" interpretation (vs "intersects") matches the
+  retained-channel §III exposure scale in the paper: a pair event
+  contributes to a logical only when its full 2-qubit image can be
+  absorbed inside the support.
+- *`total()` uses `per_tick`,* which is over *all* records regardless
+  of weight. `per_data_pair` is restricted to weight-2 records (the
+  ones that define a canonical qubit pair); it matches `total()` when
+  every event is weight-2, which is the normal retained-channel
+  regime. Non-weight-2 events still appear in `per_tick` and
+  `per_route_pair` for full provenance.
+- *`fingerprint()` now covers the new tables* because `to_json`
+  includes them. Two compiles of the same inputs produce
+  byte-identical JSON and therefore byte-identical SHA256.
+- *`correlation_graph` is NetworkX, undirected, sector-merged.*
+  Callers that need per-sector weights iterate
+  `correlation_edges` directly.
+- *Decoder artifact is a shell.* `single_prior` is populated to
+  `(0.0,) * len(code.data_qubits)`; PR 17 will fill it with local-noise
+  priors and add the adapter methods. The `decoder_hint` defaults to
+  empty string.
+
+**Tests** — 58 new (625 total, up from 567): 29 in
+`test_ir_metrics.py`, 16 in `test_ir_decoder_artifact.py`, 12 in
+`test_compiler_geometry.py::TestCompiledExtractionPR9` and
+`TestSteaneCrossingPR9`, plus the v2 backward-compat test.

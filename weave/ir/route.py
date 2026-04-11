@@ -17,6 +17,7 @@ beyond.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,35 @@ class RouteID:
             step_tick=step_tick,
             term_name=term_name,
             instance=instance,
+        )
+
+    # ------------------------------------------------------------------
+    # JSON serialization
+    # ------------------------------------------------------------------
+
+    def to_json(self) -> dict[str, Any]:
+        """Serialize to a JSON-compatible dict.
+
+        Used by `weave.ir.metrics.ExposureMetrics.per_route_pair` and
+        anywhere else that stores routes inside a `CompiledExtraction`.
+        """
+        return {
+            "source": self.source,
+            "target": self.target,
+            "step_tick": self.step_tick,
+            "term_name": self.term_name,
+            "instance": self.instance,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> RouteID:
+        """Reconstruct from a JSON dict produced by :meth:`to_json`."""
+        return cls(
+            source=int(data["source"]),
+            target=int(data["target"]),
+            step_tick=int(data.get("step_tick", 0)),
+            term_name=data.get("term_name"),
+            instance=int(data.get("instance", 0)),
         )
 
 

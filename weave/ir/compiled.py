@@ -19,14 +19,14 @@ Why pure data
 * **Lazy materialization.** The `circuit` / `dem` properties parse the
   stored text on first access and cache the result in a private dict.
 
-Current shape (PR 8)
+Current shape (PR 9)
 --------------------
-Schema v2 adds the `provenance` field: a tuple of
-:class:`ProvenanceRecord`, one per pair event emitted as a Stim
-`CORRELATED_ERROR` by the geometry pass. Older v1 artifacts still
-load via a default-empty `provenance` fallback in `from_json`. PR 9
-will add `correlation_edges`, `exposure_metrics`, and
-`decoder_artifact` and bump to v3.
+Schema v3 adds three pure-data tables (`correlation_edges`,
+`exposure_metrics`, `decoder_artifact`) alongside the `provenance`
+list from v2 and the circuit/DEM text and input fingerprints from v1.
+Older artifacts round-trip by defaulting the new fields to empty
+values: v1 records load with empty `provenance`, v2 records load with
+empty correlation tables, and v3 is the current canonical form.
 """
 
 from __future__ import annotations
@@ -37,7 +37,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:
+    import networkx as nx
     import stim  # noqa: F401
+
+    from .decoder_artifact import DecoderArtifact
+    from .metrics import CorrelationEdgeRecord, ExposureMetrics
 
 
 # =============================================================================
@@ -204,7 +208,7 @@ class CompiledExtraction:
     is excluded from `compare` and `repr`.
     """
 
-    SCHEMA_VERSION: ClassVar[int] = 2
+    SCHEMA_VERSION: ClassVar[int] = 3
 
     circuit_text: str
     dem_text: str
@@ -218,9 +222,13 @@ class CompiledExtraction:
     geometry_noise_spec: dict[str, Any]
 
     provenance: tuple[ProvenanceRecord, ...] = ()
+    correlation_edges: tuple[CorrelationEdgeRecord, ...] = ()
+    exposure_metrics: ExposureMetrics | None = None
+    decoder_artifact: DecoderArtifact | None = None
 
-    # Private lazy cache for live Stim objects. Excluded from compare
-    # and repr so equality and printing work as pure data.
+    # Private lazy cache for live Stim objects and the NetworkX
+    # correlation graph. Excluded from compare and repr so equality
+    # and printing work as pure data.
     _cache: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @property
@@ -248,6 +256,43 @@ class CompiledExtraction:
 
             self._cache["dem"] = stim.DetectorErrorModel(self.dem_text)
         return self._cache["dem"]
+
+    @property
+    def correlation_graph(self) -> nx.Graph:
+        """Lazily construct a NetworkX graph from `correlation_edges`.
+
+        Each :class:`~weave.ir.CorrelationEdgeRecord` contributes one
+        undirected edge keyed by `(qubit_a, qubit_b)` with `weight`
+        and `sector` attributes. A qubit pair that receives events
+        in both CSS sectors produces two multigraph-style entries
+        reduced to a single graph edge whose `weight` is the max
+        over sectors and whose `sectors` attribute is the set of
+        participating sectors; downstream queries that need the raw
+        per-sector weights should iterate :attr:`correlation_edges`
+        directly.
+
+        The graph is cached after the first access. Mutating the
+        returned graph is undefined behaviour — treat it as read-only.
+        """
+        if "correlation_graph" not in self._cache:
+            import networkx as nx
+
+            g: nx.Graph = nx.Graph()
+            for edge in self.correlation_edges:
+                key = (edge.qubit_a, edge.qubit_b)
+                if g.has_edge(*key):
+                    existing = g.edges[key]
+                    existing["weight"] = max(existing["weight"], edge.weight)
+                    existing["sectors"] = existing["sectors"] | {edge.sector}
+                else:
+                    g.add_edge(
+                        edge.qubit_a,
+                        edge.qubit_b,
+                        weight=edge.weight,
+                        sectors={edge.sector},
+                    )
+            self._cache["correlation_graph"] = g
+        return self._cache["correlation_graph"]
 
     # ------------------------------------------------------------------
     # Fingerprint
@@ -280,20 +325,44 @@ class CompiledExtraction:
             "local_noise_spec": self.local_noise_spec,
             "geometry_noise_spec": self.geometry_noise_spec,
             "provenance": [rec.to_json() for rec in self.provenance],
+            "correlation_edges": [edge.to_json() for edge in self.correlation_edges],
+            "exposure_metrics": (
+                self.exposure_metrics.to_json() if self.exposure_metrics is not None else None
+            ),
+            "decoder_artifact": (
+                self.decoder_artifact.to_json() if self.decoder_artifact is not None else None
+            ),
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> CompiledExtraction:
+        # Local imports avoid a circular dependency: metrics.py and
+        # decoder_artifact.py both import ProvenanceRecord from this
+        # module, so we defer loading them until deserialization.
+        from .decoder_artifact import DecoderArtifact
+        from .metrics import CorrelationEdgeRecord, ExposureMetrics
+
         if data.get("type") != "compiled_extraction":
             raise ValueError(f"Expected type='compiled_extraction', got {data.get('type')!r}.")
         version = data.get("schema_version")
-        if version not in (1, cls.SCHEMA_VERSION):
+        if version not in (1, 2, cls.SCHEMA_VERSION):
             raise ValueError(
-                f"Unsupported schema_version {version}; expected 1 or {cls.SCHEMA_VERSION}."
+                f"Unsupported schema_version {version}; expected one of 1, 2, {cls.SCHEMA_VERSION}."
             )
-        # v1 had no provenance field; default to empty. v2 round-trips it.
+        # v1 had no provenance; v2 added provenance; v3 adds the
+        # three pure-data tables. Missing fields default to empty.
         raw_provenance = data.get("provenance", [])
         provenance = tuple(ProvenanceRecord.from_json(r) for r in raw_provenance)
+        raw_edges = data.get("correlation_edges", [])
+        correlation_edges = tuple(CorrelationEdgeRecord.from_json(e) for e in raw_edges)
+        raw_metrics = data.get("exposure_metrics")
+        exposure_metrics = (
+            ExposureMetrics.from_json(raw_metrics) if raw_metrics is not None else None
+        )
+        raw_decoder = data.get("decoder_artifact")
+        decoder_artifact = (
+            DecoderArtifact.from_json(raw_decoder) if raw_decoder is not None else None
+        )
         return cls(
             circuit_text=data["circuit_text"],
             dem_text=data["dem_text"],
@@ -305,4 +374,7 @@ class CompiledExtraction:
             local_noise_spec=data["local_noise_spec"],
             geometry_noise_spec=data["geometry_noise_spec"],
             provenance=provenance,
+            correlation_edges=correlation_edges,
+            exposure_metrics=exposure_metrics,
+            decoder_artifact=decoder_artifact,
         )

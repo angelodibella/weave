@@ -66,8 +66,8 @@ class TestCompiledExtractionBasics:
 
     def test_schema_version(self):
         ce = _minimal_compiled()
-        assert ce.schema_version == 2
-        assert CompiledExtraction.SCHEMA_VERSION == 2
+        assert ce.schema_version == 3
+        assert CompiledExtraction.SCHEMA_VERSION == 3
 
     def test_equality(self):
         a = _minimal_compiled()
@@ -185,7 +185,7 @@ class TestCompiledExtractionJson:
     def test_to_json_has_type_discriminator(self):
         data = _minimal_compiled().to_json()
         assert data["type"] == "compiled_extraction"
-        assert data["schema_version"] == 2
+        assert data["schema_version"] == 3
 
     def test_from_json_rejects_wrong_type(self):
         with pytest.raises(ValueError, match="type='compiled_extraction'"):

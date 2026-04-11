@@ -5,17 +5,20 @@ and produces a :class:`~weave.ir.CompiledExtraction` bundle whose
 `circuit_text` is a canonical Stim circuit and whose `dem_text` is
 its detector error model.
 
-PR 5 shipped the local-noise-only path; PR 8 adds the geometry
+PR 5 shipped the local-noise-only path; PR 8 added the geometry
 branch, which — when `geometry_noise.J0 > 0` — walks the routed
 embedding, computes per-pair coefficients via the
 `route_metric → kernel → sin²` pipeline, calls the
 :mod:`weave.analysis` propagator to determine each pair fault's
 data-level image, and injects `CORRELATED_ERROR` instructions into
-each round of the cycle. The resulting provenance list is attached
-to the returned `CompiledExtraction`.
+each round of the cycle.
 
-PR 9 will populate the correlation-graph / exposure / decoder
-fields of `CompiledExtraction`.
+PR 9 finalises the `CompiledExtraction` output bundle: the
+provenance list feeds :mod:`weave.ir.metrics` to produce
+correlation-edge records, exposure-metric tables, and a decoder
+artifact shell, all attached to the returned object. The compiler
+is now a single pass: inputs in → compiled text + tables + lazy
+materializers out.
 """
 
 from __future__ import annotations
@@ -38,6 +41,9 @@ from ..ir import (
     ProvenanceRecord,
     RoutePairMetric,
     Schedule,
+    build_correlation_edges,
+    build_decoder_artifact,
+    build_exposure_metrics,
 )
 from .circuit_emit import emit_correlated_error, emit_step
 from .geometry_pass import compute_provenance
@@ -180,7 +186,23 @@ def compile_extraction(
     # ------------------------------------------------------------------
     # Compute the DEM.
     # ------------------------------------------------------------------
-    dem = circuit.detector_error_model(decompose_errors=True, approximate_disjoint_errors=True)
+    # `decompose_errors=True` produces matching-friendly DEMs for
+    # PyMatching. Correlated two-qubit errors injected by the
+    # geometry pass typically flip three or more detectors and
+    # defeat the graphlike decomposition, so we fall back to the
+    # undecomposed BP+OSD-friendly form whenever provenance is
+    # non-empty. Pure local-noise compiles still take the matching
+    # path to preserve the PR 5 faithfulness tests.
+    decompose = len(provenance) == 0
+    dem = circuit.detector_error_model(decompose_errors=decompose, approximate_disjoint_errors=True)
+
+    # ------------------------------------------------------------------
+    # Build the PR 9 pure-data tables from the provenance list.
+    # ------------------------------------------------------------------
+    correlation_edges = build_correlation_edges(provenance)
+    logical_supports = _code_logical_supports(code, experiment)
+    exposure_metrics = build_exposure_metrics(provenance, logical_supports=logical_supports)
+    decoder_artifact = build_decoder_artifact(provenance, num_data_qubits=len(code.data_qubits))
 
     # ------------------------------------------------------------------
     # Package the output as pure data.
@@ -196,6 +218,9 @@ def compile_extraction(
         local_noise_spec=local_noise.to_json(),
         geometry_noise_spec=geometry_noise.to_json(),
         provenance=provenance,
+        correlation_edges=correlation_edges,
+        exposure_metrics=exposure_metrics,
+        decoder_artifact=decoder_artifact,
     )
     # Stim's text form rounds floating-point arguments to ~7 digits
     # for readability, which loses precision on e.g. a pair probability
@@ -315,6 +340,31 @@ def _emit_observables(
     for i, lq in enumerate(logicals_to_emit):
         recs = [stim.target_rec(int(q) - num_data) for q in lq]
         circuit.append("OBSERVABLE_INCLUDE", recs, i)
+
+
+# ============================================================================
+# PR 9 support: logical-representative supports for exposure metrics
+# ============================================================================
+
+
+def _code_logical_supports(code: CSSCode, experiment: str) -> tuple[tuple[int, ...], ...]:
+    """Return the decoded-sector logical supports as sorted qubit tuples.
+
+    Mirrors the sector convention of :func:`_emit_observables`:
+    `z_memory` decodes X errors and uses the Z-logical supports;
+    `x_memory` decodes Z errors and uses the X-logical supports.
+    Each support is the set of data-qubit indices where the
+    representative logical acts nontrivially, sorted ascending.
+    Used by the PR 9 exposure-metric builder to produce
+    `per_support` records.
+    """
+    x_logicals, z_logicals = code.find_logicals()
+    logicals = z_logicals if experiment == "z_memory" else x_logicals
+    supports: list[tuple[int, ...]] = []
+    for row in logicals:
+        support = tuple(int(i) for i in np.where(row == 1)[0])
+        supports.append(support)
+    return tuple(supports)
 
 
 # ============================================================================
