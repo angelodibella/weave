@@ -41,7 +41,7 @@ Schedule
     :func:`default_css_schedule`.
 """
 
-from .compiled import CompiledExtraction
+from .compiled import CompiledExtraction, ProvenanceRecord
 from .embedding import (
     Embedding,
     IREdge,
@@ -92,6 +92,7 @@ __all__ = [
     "LocalNoise",
     "LocalNoiseConfig",
     "MinDistanceMetric",
+    "ProvenanceRecord",
     "QubitRole",
     "RegularizedPowerLawKernel",
     "RouteID",

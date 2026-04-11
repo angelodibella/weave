@@ -83,6 +83,7 @@ files = [
     "weave/geometry",
     "weave/ir",
     "weave/compiler",
+    "weave/analysis",
 ]
 ignore_missing_imports = true  # stim, stimbposd, sinter, pymatching have no stubs
 # GUI module is intentionally excluded from `files` until PySide6 typing

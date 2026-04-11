@@ -5,16 +5,23 @@ and produces a :class:`~weave.ir.CompiledExtraction` bundle whose
 `circuit_text` is a canonical Stim circuit and whose `dem_text` is
 its detector error model.
 
-This is the PR 5 shape: local noise only. The geometry pass (PR 8)
-will extend this function to also walk routed polylines and inject
-`CORRELATED_ERROR` instructions when `geometry_noise.J0 > 0`. PR 9
-will populate the provenance / correlation-graph / exposure / decoder
+PR 5 shipped the local-noise-only path; PR 8 adds the geometry
+branch, which — when `geometry_noise.J0 > 0` — walks the routed
+embedding, computes per-pair coefficients via the
+`route_metric → kernel → sin²` pipeline, calls the
+:mod:`weave.analysis` propagator to determine each pair fault's
+data-level image, and injects `CORRELATED_ERROR` instructions into
+each round of the cycle. The resulting provenance list is attached
+to the returned `CompiledExtraction`.
+
+PR 9 will populate the correlation-graph / exposure / decoder
 fields of `CompiledExtraction`.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -28,10 +35,12 @@ from ..ir import (
     LocalNoise,
     LocalNoiseConfig,
     MinDistanceMetric,
+    ProvenanceRecord,
     RoutePairMetric,
     Schedule,
 )
-from .circuit_emit import emit_step
+from .circuit_emit import emit_correlated_error, emit_step
+from .geometry_pass import compute_provenance
 
 if TYPE_CHECKING:
     import stim
@@ -115,6 +124,23 @@ def compile_extraction(
         geometry_noise = GeometryNoiseConfig()
 
     # ------------------------------------------------------------------
+    # Geometry pass: one-shot provenance for the whole cycle. Each
+    # record represents a pair-fault event that fires in every round.
+    # ------------------------------------------------------------------
+    provenance: tuple[ProvenanceRecord, ...] = tuple(
+        compute_provenance(
+            schedule=schedule,
+            embedding=embedding,
+            kernel=kernel,
+            route_metric=route_metric,
+            geometry_noise=geometry_noise,
+        )
+    )
+    events_by_tick: dict[int, list[ProvenanceRecord]] = defaultdict(list)
+    for rec in provenance:
+        events_by_tick[rec.tick_index].append(rec)
+
+    # ------------------------------------------------------------------
     # Build the circuit.
     # ------------------------------------------------------------------
     circuit = stim.Circuit()
@@ -125,6 +151,8 @@ def compile_extraction(
 
     # Round 1 body.
     for step in schedule.cycle_steps:
+        for rec in events_by_tick.get(step.tick_index, ()):
+            emit_correlated_error(circuit, rec)
         emit_step(circuit, step, local_noise)
 
     # First-round detectors reference only the just-measured ancillas.
@@ -133,6 +161,8 @@ def compile_extraction(
     # Rounds 2..N: body + comparison detectors.
     for _ in range(rounds - 1):
         for step in schedule.cycle_steps:
+            for rec in events_by_tick.get(step.tick_index, ()):
+                emit_correlated_error(circuit, rec)
             emit_step(circuit, step, local_noise)
         _emit_comparison_detectors(circuit, code)
 
@@ -155,7 +185,7 @@ def compile_extraction(
     # ------------------------------------------------------------------
     # Package the output as pure data.
     # ------------------------------------------------------------------
-    return CompiledExtraction(
+    result = CompiledExtraction(
         circuit_text=str(circuit),
         dem_text=str(dem),
         code_fingerprint=_code_fingerprint(code),
@@ -165,7 +195,17 @@ def compile_extraction(
         route_metric_spec=route_metric.to_json(),
         local_noise_spec=local_noise.to_json(),
         geometry_noise_spec=geometry_noise.to_json(),
+        provenance=provenance,
     )
+    # Stim's text form rounds floating-point arguments to ~7 digits
+    # for readability, which loses precision on e.g. a pair probability
+    # like `sin²(τJ₀κ)`. We pre-populate `_cache` with the exact
+    # in-memory objects so downstream consumers that access
+    # `result.circuit` / `result.dem` see full double precision.
+    # JSON round-trips still go through the lossy text form.
+    result._cache["circuit"] = circuit
+    result._cache["dem"] = dem
+    return result
 
 
 # ============================================================================

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..ir import LocalNoise, ScheduleStep, TwoQubitEdge
+from ..ir import LocalNoise, ProvenanceRecord, ScheduleStep, TwoQubitEdge
 
 if TYPE_CHECKING:
     import stim
@@ -90,3 +90,45 @@ def emit_step(circuit: stim.Circuit, step: ScheduleStep, local_noise: LocalNoise
 
     # TICK marks the end of the tick.
     circuit.append("TICK")
+
+
+def emit_correlated_error(circuit: stim.Circuit, record: ProvenanceRecord) -> None:
+    """Emit one `CORRELATED_ERROR` instruction for a provenance record.
+
+    Translates `record.data_support` and `record.data_pauli_symbols`
+    into Stim Pauli targets and appends the instruction to `circuit`
+    at `record.pair_probability`. The emitted text form is
+
+    .. code-block:: text
+
+        CORRELATED_ERROR(p) X<q_a> X<q_b>
+
+    for a weight-2 X-pair event, with analogous forms for Y/Z and
+    for other weights.
+
+    Called by the geometry branch of :func:`compile_extraction`
+    **before** the step's CNOT gates so that the correlated fault
+    conjugates forward through the remaining Cliffords — matching
+    the retained-channel convention of the PRX-Quantum-under-review
+    paper §II.D.
+    """
+    import stim
+
+    targets: list[stim.GateTarget] = []
+    for qubit, symbol in zip(record.data_support, record.data_pauli_symbols, strict=True):
+        if symbol == "X":
+            targets.append(stim.target_x(qubit))
+        elif symbol == "Y":
+            targets.append(stim.target_y(qubit))
+        elif symbol == "Z":
+            targets.append(stim.target_z(qubit))
+        else:
+            raise ValueError(
+                f"ProvenanceRecord has non-Pauli symbol {symbol!r} at qubit {qubit}; "
+                f"expected X, Y, or Z."
+            )
+    if not targets:
+        # Weight-0 events should have been filtered by the geometry
+        # pass already, but defend against an empty-support record.
+        return
+    circuit.append("CORRELATED_ERROR", targets, record.pair_probability)
