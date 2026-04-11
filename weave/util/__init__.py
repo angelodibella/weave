@@ -1,5 +1,5 @@
 """Utility functions for the weave package."""
 
-from . import pcm, graph
+from . import graph, pcm
 
 __all__ = ["pcm", "graph"]

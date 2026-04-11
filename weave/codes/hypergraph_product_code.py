@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..util import pcm
 from .base import NoiseModel
 from .css_code import CSSCode, _validate_binary_matrix
-from ..util import pcm
 
 
 class HypergraphProductCode(CSSCode):

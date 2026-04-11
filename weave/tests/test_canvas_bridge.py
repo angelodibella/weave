@@ -5,14 +5,15 @@ import sys
 import numpy as np
 import pytest
 
-from weave.util import pcm
 from weave.codes.css_code import CSSCode
+from weave.util import pcm
 
 
 # We need a QApplication for any QWidget, but don't need to show anything.
 @pytest.fixture(scope="module")
 def qapp():
     from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -22,6 +23,7 @@ def qapp():
 @pytest.fixture
 def canvas(qapp):
     from weave.gui.canvas import Canvas
+
     c = Canvas()
     c.resize(800, 600)
     return c
@@ -33,50 +35,60 @@ def _build_steane_canvas(canvas):
 
     # Create 7 data qubit nodes.
     for i in range(7):
-        canvas.nodes.append({
-            "id": i,
-            "pos": (i * 30.0, 0.0),
-            "type": "qubit",
-            "selected": False,
-        })
+        canvas.nodes.append(
+            {
+                "id": i,
+                "pos": (i * 30.0, 0.0),
+                "type": "qubit",
+                "selected": False,
+            }
+        )
 
     # Create 3 Z-stabilizer nodes (ids 7, 8, 9).
     for j in range(3):
-        canvas.nodes.append({
-            "id": 7 + j,
-            "pos": (j * 60.0, 50.0),
-            "type": "Z_stabilizer",
-            "selected": False,
-        })
+        canvas.nodes.append(
+            {
+                "id": 7 + j,
+                "pos": (j * 60.0, 50.0),
+                "type": "Z_stabilizer",
+                "selected": False,
+            }
+        )
 
     # Create 3 X-stabilizer nodes (ids 10, 11, 12).
     for k in range(3):
-        canvas.nodes.append({
-            "id": 10 + k,
-            "pos": (k * 60.0, -50.0),
-            "type": "X_stabilizer",
-            "selected": False,
-        })
+        canvas.nodes.append(
+            {
+                "id": 10 + k,
+                "pos": (k * 60.0, -50.0),
+                "type": "X_stabilizer",
+                "selected": False,
+            }
+        )
 
     # Create edges from HZ (3x7): Z-stab j connected to data qubit i where H[j,i]=1.
     for j in range(3):
         for i in range(7):
             if H[j, i]:
-                canvas.edges.append({
-                    "source": i,
-                    "target": 7 + j,
-                    "selected": False,
-                })
+                canvas.edges.append(
+                    {
+                        "source": i,
+                        "target": 7 + j,
+                        "selected": False,
+                    }
+                )
 
     # Create edges from HX (3x7): X-stab k connected to data qubit i where H[k,i]=1.
     for k in range(3):
         for i in range(7):
             if H[k, i]:
-                canvas.edges.append({
-                    "source": i,
-                    "target": 10 + k,
-                    "selected": False,
-                })
+                canvas.edges.append(
+                    {
+                        "source": i,
+                        "target": 10 + k,
+                        "selected": False,
+                    }
+                )
 
 
 # ---- _validate_quantum_graph tests ----

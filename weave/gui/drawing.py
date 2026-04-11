@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import math
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 
 from ..util.graph import find_edge_crossings, line_intersection
-from .graph_model import GraphModel, QUANTUM_TYPES
+from .graph_model import QUANTUM_TYPES, GraphModel
 
 if TYPE_CHECKING:
     from .theme import ThemeManager
@@ -88,7 +88,11 @@ def draw_snap_grid(
     y_count = int((world_end_y - world_start_y) / world_grid_size) + 1
 
     max_lines = 100
-    skip = max(1, int(math.sqrt((x_count + y_count) / max_lines * 2))) if x_count + y_count > max_lines else 1
+    skip = (
+        max(1, int(math.sqrt((x_count + y_count) / max_lines * 2)))
+        if x_count + y_count > max_lines
+        else 1
+    )
 
     painter.save()
     painter.translate(view_offset)
@@ -194,8 +198,10 @@ def draw_crossings(painter: QPainter, model: GraphModel, theme: ThemeManager) ->
     """Draw crossing diamonds at edge intersection points."""
     qnodes = {n["id"]: n for n in model.nodes if n["type"] in QUANTUM_TYPES}
     qedges = [
-        e for e in model.edges
-        if model.get_node_by_id(e["source"]) and model.get_node_by_id(e["target"])
+        e
+        for e in model.edges
+        if model.get_node_by_id(e["source"])
+        and model.get_node_by_id(e["target"])
         and model.get_node_by_id(e["source"])["type"] in QUANTUM_TYPES
         and model.get_node_by_id(e["target"])["type"] in QUANTUM_TYPES
     ]
@@ -270,9 +276,14 @@ def draw_nodes(painter: QPainter, model: GraphModel, theme: ThemeManager) -> Non
                 painter.drawEllipse(QPointF(x, y), r + highlight_size, r + highlight_size)
             else:
                 painter.drawRoundedRect(
-                    QRectF(x - l / 2 - highlight_size, y - l / 2 - highlight_size,
-                           l + 2 * highlight_size, l + 2 * highlight_size),
-                    1, 1,
+                    QRectF(
+                        x - l / 2 - highlight_size,
+                        y - l / 2 - highlight_size,
+                        l + 2 * highlight_size,
+                        l + 2 * highlight_size,
+                    ),
+                    1,
+                    1,
                 )
 
         if node_type in {"bit", "parity_check"}:
@@ -300,7 +311,9 @@ def draw_graph_borders(painter: QPainter, model: GraphModel, theme: ThemeManager
         if len(nodes) <= 2:
             continue
 
-        border_color = theme.graph_quantum if graph.graph_type == "quantum" else theme.graph_classical
+        border_color = (
+            theme.graph_quantum if graph.graph_type == "quantum" else theme.graph_classical
+        )
 
         min_x = min(n["pos"][0] for n in nodes)
         min_y = min(n["pos"][1] for n in nodes)
@@ -308,8 +321,12 @@ def draw_graph_borders(painter: QPainter, model: GraphModel, theme: ThemeManager
         max_y = max(n["pos"][1] for n in nodes)
 
         padding = 20
-        rect = QRectF(min_x - padding, min_y - padding,
-                       max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+        rect = QRectF(
+            min_x - padding,
+            min_y - padding,
+            max_x - min_x + 2 * padding,
+            max_y - min_y + 2 * padding,
+        )
 
         painter.setPen(QPen(border_color, 1.5))
         painter.setBrush(Qt.NoBrush)
@@ -326,8 +343,10 @@ def get_crossing_number(model: GraphModel) -> int:
     """Count the number of edge crossings among quantum edges."""
     qnodes = {n["id"]: n for n in model.nodes if n["type"] in QUANTUM_TYPES}
     qedges = [
-        e for e in model.edges
-        if model.get_node_by_id(e["source"]) and model.get_node_by_id(e["target"])
+        e
+        for e in model.edges
+        if model.get_node_by_id(e["source"])
+        and model.get_node_by_id(e["target"])
         and model.get_node_by_id(e["source"])["type"] in QUANTUM_TYPES
         and model.get_node_by_id(e["target"])["type"] in QUANTUM_TYPES
     ]

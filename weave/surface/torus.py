@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from matplotlib import patches
 from matplotlib.collections import LineCollection
 
 from .base import Surface
@@ -92,7 +91,7 @@ class Torus(Surface):
         scale_factor = max(self.Lx, self.Ly) / (2 * np.pi)
         self.R = major_radius if major_radius is not None else scale_factor * 2.0
         self.r = minor_radius if minor_radius is not None else scale_factor * 0.5
-        if self.R <= self.r:
+        if self.r >= self.R:
             warnings.warn(
                 f"Torus R={self.R:.2f} <= r={self.r:.2f}. 3D embedding may self-intersect.",
                 stacklevel=2,
@@ -143,7 +142,7 @@ class Torus(Surface):
         """Calculates the Euclidean length of the shortest path displacement."""
         du = path["end_unwrapped"][0] - path["start"][0]
         dv = path["end_unwrapped"][1] - path["start"][1]
-        return np.sqrt(du**2 + dv**2)
+        return float(np.sqrt(du**2 + dv**2))
 
     def check_intersection(
         self, path1: dict[str, Any], path2: dict[str, Any], return_points: bool = False
@@ -224,11 +223,7 @@ class Torus(Surface):
                 p1_s = (u1 + dx_shift, v1 + dy_shift)
                 p2_s = (u2_unw + dx_shift, v2_unw + dy_shift)
                 clipped = _liang_barsky_clip(p1_s, p2_s, xmin, ymin, xmax, ymax)
-                if (
-                    clipped
-                    and np.linalg.norm(np.array(clipped[1]) - np.array(clipped[0]))
-                    > 1e-9
-                ):
+                if clipped and np.linalg.norm(np.array(clipped[1]) - np.array(clipped[0])) > 1e-9:
                     segments.append(clipped)
         if segments:
             lc_kwargs = {
@@ -255,10 +250,10 @@ class Torus(Surface):
 
         return np.stack([x, y, z], axis=-1)
 
-    def get_3d_mesh(
-        self, u_res: int = 60, v_res: int = 40
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    def get_3d_mesh(self, **kwargs: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Generates coordinate arrays for plotting the torus mesh in 3D."""
+        u_res: int = int(kwargs.get("u_res", 60))
+        v_res: int = int(kwargs.get("v_res", 40))
         u = np.linspace(0, self.Lx, u_res)
         v = np.linspace(0, self.Ly, v_res)
         u_grid, v_grid = np.meshgrid(u, v)

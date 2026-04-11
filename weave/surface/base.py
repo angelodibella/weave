@@ -51,9 +51,7 @@ class Surface(ABC):
         pass
 
     @abstractmethod
-    def get_shortest_path(
-        self, coord1: tuple[float, float], coord2: tuple[float, float]
-    ) -> Any:
+    def get_shortest_path(self, coord1: tuple[float, float], coord2: tuple[float, float]) -> Any:
         """
         Represents the shortest path (geodesic) between two points on the surface.
 
@@ -125,9 +123,7 @@ class Surface(ABC):
         """Maps intrinsic (u, v) coordinates to 3D Euclidean space (x, y, z)."""
         pass
 
-    def get_3d_mesh(
-        self, **kwargs: Any
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    def get_3d_mesh(self, **kwargs: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Generates coordinate arrays (X, Y, Z) for plotting the surface mesh in 3D."""
         return None  # Default: no mesh
 
@@ -156,7 +152,7 @@ class Surface(ABC):
         intrinsic_points_uv = self.check_intersection(path1, path2, return_points=True)
         if not intrinsic_points_uv:
             return []
-        
+
         # Map intrinsic points to 3D.
         points_uv_array = np.array(intrinsic_points_uv)
         points_xyz_array = self.get_3d_embedding(points_uv_array)

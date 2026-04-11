@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from weave.util import pcm
 
 
@@ -62,6 +63,7 @@ def test_to_matrix_and_to_clist():
 
 
 # ---- GF(2) linear algebra tests ----
+
 
 def test_row_echelon_identity():
     I = np.eye(3, dtype=int)
@@ -139,6 +141,7 @@ def test_nullspace_and_rank_sum():
 
 # ---- Distance tests ----
 
+
 def test_distance_repetition():
     """Repetition code of length n has distance n."""
     H = pcm.repetition(5)
@@ -153,10 +156,11 @@ def test_distance_hamming():
 
 # ---- Hypergraph product with asymmetric inputs ----
 
+
 def test_hypergraph_product_asymmetric():
     """Test HP code where r1 > n1 (more checks than bits in H1.T)."""
     H1 = pcm.repetition(3)  # (2, 3)
-    H2 = pcm.hamming(7)     # (3, 7)
+    H2 = pcm.hamming(7)  # (3, 7)
     HX, HZ = pcm.hypergraph_product(H1, H2, reordered=True)
     # CSS condition must hold.
     assert np.all(np.mod(HX @ HZ.T, 2) == 0)
@@ -173,6 +177,7 @@ def test_hypergraph_product_reordered_preserves_css():
 
 # ---- Row-reduce and find_pivot_columns convenience ----
 
+
 def test_row_reduce():
     """row_reduce should return reduced form."""
     M = np.array([[1, 1, 0], [0, 1, 1], [1, 0, 1]], dtype=int)
@@ -188,6 +193,7 @@ def test_find_pivot_columns():
 
 # ---- Repetition code validation ----
 
+
 def test_repetition_n_less_than_2():
     """repetition(n) should raise ValueError for n < 2."""
     with pytest.raises(ValueError, match="must be >= 2"):
@@ -198,6 +204,7 @@ def test_repetition_n_less_than_2():
 
 
 # ---- Distance with k>1 (combination enumeration) ----
+
 
 def test_distance_k_greater_than_1():
     """Test distance computation for a code where the minimum-weight codeword

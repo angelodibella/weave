@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QMenu, QWidgetAction, QHBoxLayout, QLabel, QWidget,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QWidget,
+    QWidgetAction,
 )
-from PySide6.QtGui import QPainter, QPen, QIcon, QPixmap, QPainterPath, QAction
-from PySide6.QtCore import Qt, QPointF
 
 from .components import ToggleSwitch
 from .drawing import get_crossing_number
-from .graph_model import is_valid_connection
 
 if TYPE_CHECKING:
     from .canvas import Canvas
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
 # ------------------------------------------------------------------
 # Icon helpers
 # ------------------------------------------------------------------
+
 
 def _make_clear_icon(fg_color) -> QIcon:
     icon = QIcon()
@@ -82,6 +86,7 @@ def _make_load_icon(fg_color) -> QIcon:
 # ------------------------------------------------------------------
 # Hamburger menu
 # ------------------------------------------------------------------
+
 
 def build_hamburger_menu(canvas: Canvas) -> QMenu:
     """Create the hamburger dropdown menu."""
@@ -183,6 +188,7 @@ def update_crossing_display(canvas: Canvas) -> None:
 # Context menu
 # ------------------------------------------------------------------
 
+
 def build_context_menu(canvas: Canvas, event) -> QMenu:
     """Create the right-click context menu."""
     theme = canvas.theme_manager
@@ -233,10 +239,10 @@ def build_context_menu(canvas: Canvas, event) -> QMenu:
         for graph in canvas.model.graphs:
             if node["id"] in graph.node_ids:
                 menu.addSeparator()
-                menu.addAction("Configure && Simulate...",
-                               lambda g=graph: canvas._run_graph_simulation(g))
-                menu.addAction("Save Code...",
-                               lambda g=graph: canvas._save_graph_code(g))
+                menu.addAction(
+                    "Configure && Simulate...", lambda g=graph: canvas._run_graph_simulation(g)
+                )
+                menu.addAction("Save Code...", lambda g=graph: canvas._save_graph_code(g))
                 break
 
         copy_action = menu.addAction("Copy", lambda: canvas.model.copy_selected())

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import warnings
-
-import numpy as np
 from itertools import combinations
 
+import numpy as np
 
 # =============================================================================
 # GF(2) Linear Algebra
 # =============================================================================
+
 
 def row_echelon(matrix: np.ndarray) -> tuple[np.ndarray, int, np.ndarray, list[int]]:
     """
@@ -176,6 +175,7 @@ def find_pivot_columns(matrix: np.ndarray) -> list[int]:
 # Code Constructions
 # =============================================================================
 
+
 def repetition(n: int) -> np.ndarray:
     """
     Construct the parity-check matrix for a repetition code.
@@ -316,7 +316,7 @@ def _reorder_matrix(
     return np.concatenate(parts, axis=1)
 
 
-def to_clist(H: np.ndarray) -> list:
+def to_clist(H: np.ndarray) -> list[str | int]:
     """
     Convert a parity-check matrix to its classical list (clist) representation.
 
@@ -330,19 +330,20 @@ def to_clist(H: np.ndarray) -> list:
 
     Returns
     -------
-    List
-        The clist representation.
+    list[str | int]
+        The clist representation, a heterogeneous list of "B"/"C" markers and
+        bit-index integers.
     """
-    clist = ["B"] * H.shape[1]
+    clist: list[str | int] = ["B"] * H.shape[1]
     for row in H:
         clist.append("C")
         for i, val in enumerate(row):
             if val == 1:
-                clist.append(i)
+                clist.append(int(i))
     return clist
 
 
-def to_matrix(clist: list) -> np.ndarray:
+def to_matrix(clist: list[str | int]) -> np.ndarray:
     """
     Reconstruct a parity-check matrix from its clist representation.
 
@@ -373,12 +374,19 @@ def to_matrix(clist: list) -> np.ndarray:
     return np.array(rows, dtype=int)
 
 
-def distance(H: np.ndarray) -> int:
+def distance(H: np.ndarray) -> int | float:
     """
-    Compute the minimum distance of a code defined by parity-check matrix H.
+    Compute the minimum distance of a classical code defined by parity-check matrix H.
 
     Enumerates all 2^k - 1 non-zero GF(2) linear combinations of nullspace
     basis vectors. For small codes only (k <= 20); raises ValueError for larger k.
+
+    Note
+    ----
+    This is the *classical* minimum distance of the linear code with parity
+    check H: the minimum Hamming weight over nonzero elements of ker(H).
+    For a CSS quantum code distance (minimum weight over nontrivial
+    logicals), use `weave.codes.css_code.CSSCode.distance()` instead.
 
     Parameters
     ----------
@@ -387,8 +395,9 @@ def distance(H: np.ndarray) -> int:
 
     Returns
     -------
-    int
-        The minimum distance of the code.
+    int | float
+        The minimum distance of the code. Returns `float('inf')` when the
+        nullspace is trivial.
 
     Raises
     ------
@@ -408,13 +417,13 @@ def distance(H: np.ndarray) -> int:
         )
 
     # Enumerate all non-zero GF(2) linear combinations of basis vectors.
-    min_weight = float("inf")
+    min_weight: int | float = float("inf")
     for r in range(1, k + 1):
         for combo in combinations(range(k), r):
             codeword = np.zeros(ker.shape[1], dtype=int)
             for idx in combo:
                 codeword = (codeword + ker[idx]) % 2
-            weight = np.sum(codeword)
+            weight = int(np.sum(codeword))
             if 0 < weight < min_weight:
                 min_weight = weight
 

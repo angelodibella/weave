@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QFileDialog, QMessageBox
-from PySide6.QtGui import QPainter, QMouseEvent, QKeyEvent, QWheelEvent, QAction
-from PySide6.QtCore import Qt, QPointF, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtCore import Property, QEasingCurve, QPointF, QPropertyAnimation, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
-from .theme import ThemeManager
-from .components import MenuIcon
-from .graph_model import GraphModel, GraphData
-from .input_handler import InputHandler
+from . import code_bridge
 from . import drawing as draw
 from . import menus as menu_builder
-from . import code_bridge
+from .components import MenuIcon
+from .graph_model import GraphData, GraphModel
+from .input_handler import InputHandler
+from .theme import ThemeManager
 
 
 class Canvas(QWidget):
@@ -235,16 +235,25 @@ class Canvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), self.theme_manager.background)
 
-        draw.draw_grid(painter, self.theme_manager, self._view_offset, self._zoom,
-                       self.width(), self.height())
+        draw.draw_grid(
+            painter, self.theme_manager, self._view_offset, self._zoom, self.width(), self.height()
+        )
 
         if self.grid_mode:
-            draw.draw_snap_grid(painter, self.theme_manager, self._view_offset, self._zoom,
-                                self.grid_size, self.width(), self.height())
+            draw.draw_snap_grid(
+                painter,
+                self.theme_manager,
+                self._view_offset,
+                self._zoom,
+                self.grid_size,
+                self.width(),
+                self.height(),
+            )
 
         if self.selecting and self.selection_rect is not None:
-            draw.draw_selection_rect(painter, self.theme_manager, self.selection_rect,
-                                     self._view_offset, self._zoom)
+            draw.draw_selection_rect(
+                painter, self.theme_manager, self.selection_rect, self._view_offset, self._zoom
+            )
 
         painter.save()
         painter.translate(self._view_offset)
@@ -375,8 +384,9 @@ class Canvas(QWidget):
             self.load_from_file(file_path)
 
     def _export_code(self):
+        # Validate the model compiles to a CSS code before prompting for a path.
         try:
-            css_code = self.to_css_code()
+            self.to_css_code()
         except ValueError as e:
             QMessageBox.warning(self, "Export Error", str(e))
             return
@@ -396,6 +406,7 @@ class Canvas(QWidget):
             return
 
         from .simulation import SimulationDialog
+
         dialog = SimulationDialog(css_code, self)
         dialog.exec()
 
@@ -408,21 +419,21 @@ class Canvas(QWidget):
             return
 
         from .simulation import SimulationDialog
+
         dialog = SimulationDialog(css_code, self, graph_data=graph_data)
         dialog.exec()
 
     def _save_graph_code(self, graph_data: GraphData):
         """Save a detected graph's code to a JSON file."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Code", "", "JSON Files (*.json)"
-        )
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Code", "", "JSON Files (*.json)")
         if not file_path:
             return
         if not file_path.endswith(".json"):
             file_path += ".json"
         try:
             code_bridge.save_code_json(
-                self.model, file_path,
+                self.model,
+                file_path,
                 graph_data=graph_data,
                 noise_config=graph_data.noise_config,
                 logical_indices=graph_data.logical_indices,

@@ -1,7 +1,6 @@
-from .codes import NoiseModel, CSSCode, HypergraphProductCode
-from .util import pcm, graph
-
 from . import surface
+from .codes import CSSCode, HypergraphProductCode, NoiseModel
+from .util import graph, pcm
 
 __all__ = [
     "NoiseModel",

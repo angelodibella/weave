@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import math
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
 
-from .graph_model import GraphModel, GraphData, is_valid_connection
+from .graph_model import GraphData, GraphModel, is_valid_connection
 
 if TYPE_CHECKING:
     from .canvas import Canvas
@@ -50,7 +50,7 @@ class InputHandler:
             nx, ny = node["pos"]
             dx = adjusted_x - nx
             dy = adjusted_y - ny
-            if dx * dx + dy * dy <= self.model.node_radius ** 2:
+            if dx * dx + dy * dy <= self.model.node_radius**2:
                 return node
         return None
 
@@ -86,10 +86,15 @@ class InputHandler:
             max_y = max(n["pos"][1] for n in nodes)
 
             padding = 20
-            rect_f = (min_x - padding, min_y - padding,
-                      max_x - min_x + 2 * padding, max_y - min_y + 2 * padding)
+            rect_f = (
+                min_x - padding,
+                min_y - padding,
+                max_x - min_x + 2 * padding,
+                max_y - min_y + 2 * padding,
+            )
 
             from PySide6.QtCore import QRectF
+
             rect = QRectF(*rect_f)
             border_width = 10 / self.canvas._zoom
             outer_rect = rect.adjusted(-border_width, -border_width, border_width, border_width)
@@ -189,9 +194,7 @@ class InputHandler:
 
             self.canvas.graph_drag = clicked_graph
             self.canvas.graph_drag_initial_positions = {
-                n["id"]: n["pos"]
-                for n in self.model.nodes
-                if n["id"] in clicked_graph.node_ids
+                n["id"]: n["pos"] for n in self.model.nodes if n["id"] in clicked_graph.node_ids
             }
             self.canvas.drag_start = pos
             self.canvas.update()
@@ -243,7 +246,9 @@ class InputHandler:
             self.canvas._drag_start_positions = {}
             world_pos = self.widget_to_world(pos)
             self.canvas.selection_rect_start = world_pos
-            self.canvas.selection_mode = "edge" if event.modifiers() & Qt.ControlModifier else "node"
+            self.canvas.selection_mode = (
+                "edge" if event.modifiers() & Qt.ControlModifier else "node"
+            )
         else:
             self.model.deselect_all()
             self.canvas.pan_active = True
@@ -281,8 +286,12 @@ class InputHandler:
                     if source and target:
                         x1, y1 = source["pos"]
                         x2, y2 = target["pos"]
-                        if (x_min <= x1 <= x_max and y_min <= y1 <= y_max
-                                and x_min <= x2 <= x_max and y_min <= y2 <= y_max):
+                        if (
+                            x_min <= x1 <= x_max
+                            and y_min <= y1 <= y_max
+                            and x_min <= x2 <= x_max
+                            and y_min <= y2 <= y_max
+                        ):
                             edge["selected"] = True
             self.canvas.selecting = False
             self.canvas.selection_rect_start = None
@@ -297,7 +306,9 @@ class InputHandler:
 
         if self.canvas._shift_press_node is not None:
             if (event.position() - self.canvas._shift_press_pos).manhattanLength() < 10:
-                self.canvas._shift_press_node["selected"] = not self.canvas._shift_press_was_selected
+                self.canvas._shift_press_node[
+                    "selected"
+                ] = not self.canvas._shift_press_was_selected
             self.canvas._shift_press_node = None
             self.canvas.update()
 

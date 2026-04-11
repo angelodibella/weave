@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import networkx as nx
-import numpy as np
 from matplotlib import pyplot as plt
 
 
@@ -64,13 +63,16 @@ def compute_layout(
 
     # Build a list of positions ordered by node attribute given by index_key.
     num_nodes = graph.number_of_nodes()
-    pos_list = [None] * num_nodes
+    pos_list: list[tuple[float, float] | None] = [None] * num_nodes
     for node, pos in pos_dict.items():
         idx = graph.nodes[node].get(index_key, None)
         if idx is None:
             raise ValueError(f"Node {node} missing attribute '{index_key}'.")
-        pos_list[idx] = pos
-    return pos_list
+        pos_list[idx] = (float(pos[0]), float(pos[1]))
+    if any(p is None for p in pos_list):
+        missing = [i for i, p in enumerate(pos_list) if p is None]
+        raise ValueError(f"Layout produced no positions for indices {missing}.")
+    return pos_list  # type: ignore[return-value]
 
 
 def find_edge_crossings(
@@ -112,9 +114,7 @@ def find_edge_crossings(
     return crossings
 
 
-def _ccw(
-    A: tuple[float, float], B: tuple[float, float], C: tuple[float, float]
-) -> bool:
+def _ccw(A: tuple[float, float], B: tuple[float, float], C: tuple[float, float]) -> bool:
     """
     Check if three points make a counter-clockwise turn.
 
@@ -227,9 +227,7 @@ def draw(
 
     # Draw nodes by type.
     for ntype, shape in shapes.items():
-        nodes = [
-            node for node, attr in graph.nodes.items() if attr.get("type") == ntype
-        ]
+        nodes = [node for node, attr in graph.nodes.items() if attr.get("type") == ntype]
         if not nodes:
             continue
 
@@ -259,9 +257,7 @@ def draw(
 
     # Highlight crossings if requested
     if crossings:
-        edges = [
-            tuple(graph.nodes[node]["index"] for node in edge) for edge in graph.edges()
-        ]
+        edges = [tuple(graph.nodes[node]["index"] for node in edge) for edge in graph.edges()]
         cross_set = find_edge_crossings(pos, edges)
 
         for crossing in cross_set:

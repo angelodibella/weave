@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal
-
 
 QUANTUM_TYPES = frozenset({"qubit", "Z_stabilizer", "X_stabilizer"})
 CLASSICAL_TYPES = frozenset({"bit", "parity_check"})
@@ -19,9 +17,8 @@ def is_valid_connection(source: dict[str, Any], target: dict[str, Any]) -> bool:
     """Check if a connection between two nodes is valid."""
     if source["type"] in QUANTUM_TYPES and target["type"] in QUANTUM_TYPES:
         return (
-            (source["type"] == "qubit" and target["type"] in {"Z_stabilizer", "X_stabilizer"})
-            or (target["type"] == "qubit" and source["type"] in {"Z_stabilizer", "X_stabilizer"})
-        )
+            source["type"] == "qubit" and target["type"] in {"Z_stabilizer", "X_stabilizer"}
+        ) or (target["type"] == "qubit" and source["type"] in {"Z_stabilizer", "X_stabilizer"})
     elif source["type"] in CLASSICAL_TYPES and target["type"] in CLASSICAL_TYPES:
         return source["type"] != target["type"]
     return False
@@ -30,6 +27,7 @@ def is_valid_connection(source: dict[str, Any], target: dict[str, Any]) -> bool:
 @dataclass
 class GraphData:
     """Data for a detected graph (connected component)."""
+
     node_ids: set[int]
     graph_type: str  # 'quantum' or 'classical'
     selected: bool = False
@@ -48,8 +46,8 @@ class GraphModel(QObject):
 
     model_changed = Signal()
     selection_changed = Signal()
-    graph_detected = Signal(object)   # GraphData
-    graph_removed = Signal(object)    # GraphData
+    graph_detected = Signal(object)  # GraphData
+    graph_removed = Signal(object)  # GraphData
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -99,9 +97,8 @@ class GraphModel(QObject):
 
     def edge_exists(self, source_id: int, target_id: int) -> bool:
         for edge in self.edges:
-            if (
-                (edge["source"] == source_id and edge["target"] == target_id)
-                or (edge["source"] == target_id and edge["target"] == source_id)
+            if (edge["source"] == source_id and edge["target"] == target_id) or (
+                edge["source"] == target_id and edge["target"] == source_id
             ):
                 return True
         return False
@@ -221,7 +218,8 @@ class GraphModel(QObject):
         selected_ids = {n["id"] for n in selected}
         self.clipboard_nodes = [n.copy() for n in selected]
         self.clipboard_edges = [
-            e.copy() for e in self.edges
+            e.copy()
+            for e in self.edges
             if e["source"] in selected_ids and e["target"] in selected_ids
         ]
         if self.clipboard_nodes:
@@ -287,7 +285,8 @@ class GraphModel(QObject):
             ids_to_remove = {n["id"] for n in selected_nodes}
             self.nodes = [n for n in self.nodes if n["id"] not in ids_to_remove]
             self.edges = [
-                e for e in self.edges
+                e
+                for e in self.edges
                 if e["source"] not in ids_to_remove and e["target"] not in ids_to_remove
             ]
             self.deselect_all()
@@ -317,10 +316,11 @@ class GraphModel(QObject):
     # Serialization
     # ------------------------------------------------------------------
 
-    def save_to_file(self, filename: str, view_offset: tuple[float, float] = (0, 0), zoom: float = 1.0) -> None:
+    def save_to_file(
+        self, filename: str, view_offset: tuple[float, float] = (0, 0), zoom: float = 1.0
+    ) -> None:
         serializable_graphs = [
-            {"node_ids": list(g.node_ids), "type": g.graph_type}
-            for g in self.graphs
+            {"node_ids": list(g.node_ids), "type": g.graph_type} for g in self.graphs
         ]
         data = {
             "nodes": [{k: v for k, v in node.items() if k != "selected"} for node in self.nodes],
@@ -334,7 +334,7 @@ class GraphModel(QObject):
 
     def load_from_file(self, filename: str) -> tuple[tuple[float, float], float]:
         """Load model from file. Returns (view_offset, zoom)."""
-        with open(filename, "r") as f:
+        with open(filename) as f:
             data = json.load(f)
 
         self.nodes = [dict(node, selected=False) for node in data.get("nodes", [])]
@@ -342,9 +342,7 @@ class GraphModel(QObject):
 
         self.graphs = []
         for gd in data.get("graphs", []):
-            self.graphs.append(
-                GraphData(node_ids=set(gd["node_ids"]), graph_type=gd["type"])
-            )
+            self.graphs.append(GraphData(node_ids=set(gd["node_ids"]), graph_type=gd["type"]))
 
         view_offset = tuple(data.get("view_offset", [0, 0]))
         zoom = data.get("zoom", 1.0)

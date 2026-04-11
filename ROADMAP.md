@@ -37,7 +37,7 @@ The highest priority. Every circuit Weave generates must faithfully implement th
 - ~~**GUI BFS queue**~~: Replaced `list.pop(0)` with `collections.deque.popleft()` in `Canvas._detect_connected_component`.
 - ~~**Type annotations**~~: Migrated all source files from `typing.List`, `typing.Tuple`, `typing.Optional`, `typing.Union` to built-in generics (`list`, `tuple`, `X | None`, `X | Y`).
 - ~~**Build system**~~: Migrated from `poetry-core` to `hatchling` as build backend. Moved test dependencies to `[project.optional-dependencies]`.
-- ~~**Testing coverage**~~: Expanded from 30 to 50 tests. New coverage includes:
+- ~~**Testing coverage**~~: Expanded from 30 to 109 tests (7 files). New coverage includes:
   - Steane code [[7,1,3]] circuit correctness (noiseless detectors, noisy DEM, logical validity).
   - Lazy circuit generation and invalidation behavior.
   - CSS condition violation detection.

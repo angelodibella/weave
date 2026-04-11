@@ -1,4 +1,5 @@
 import pytest
+
 from weave.codes.base import NoiseModel
 from weave.util import pcm
 

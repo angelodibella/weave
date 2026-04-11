@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from itertools import combinations
 
+import networkx as nx
 import numpy as np
 import stim
-import networkx as nx
 
+from ..util import graph, pcm
 from .base import NoiseModel, QuantumCode
-from ..util import pcm, graph
 
 
 class CSSCode(QuantumCode):
@@ -62,20 +62,14 @@ class CSSCode(QuantumCode):
             raise ValueError(f"rounds must be >= 1, got {rounds}.")
 
         if experiment not in ("z_memory", "x_memory"):
-            raise ValueError(
-                f"Experiment must be 'z_memory' or 'x_memory', got '{experiment}'."
-            )
+            raise ValueError(f"Experiment must be 'z_memory' or 'x_memory', got '{experiment}'.")
 
         # Verify that HX and HZ satisfy the CSS condition.
         if not np.all(np.mod(np.dot(HX, HZ.T), 2) == 0):
             raise ValueError("CSS condition not satisfied.")
 
         # Calculate logical qubits using exact GF(2) rank.
-        k = (
-            HZ.shape[1]
-            - pcm.row_echelon(HZ)[1]
-            - pcm.row_echelon(HX)[1]
-        )
+        k = HZ.shape[1] - pcm.row_echelon(HZ)[1] - pcm.row_echelon(HX)[1]
         # n in [[n, k, d]] counts data qubits only, following the QEC
         # convention. Ancillas are a property of the extraction circuit
         # and are reported separately via n_total.
@@ -144,7 +138,7 @@ class CSSCode(QuantumCode):
         round_circuit = stim.Circuit()
 
         # Z-check stabilizer operations.
-        for target, row in zip(self.z_check_qubits, self.HZ):
+        for target, row in zip(self.z_check_qubits, self.HZ, strict=True):
             data_idxs = [self.data_qubits[i] for i, v in enumerate(row) if v]
             for dq in data_idxs:
                 round_circuit.append("CNOT", [dq, target])
@@ -152,7 +146,7 @@ class CSSCode(QuantumCode):
 
         # X-check stabilizer operations.
         # Uses H-CNOT-...-CNOT-H bracket per check (equivalent to measuring X stabilizers).
-        for target, row in zip(self.x_check_qubits, self.HX):
+        for target, row in zip(self.x_check_qubits, self.HX, strict=True):
             data_idxs = [self.data_qubits[i] for i, v in enumerate(row) if v]
             round_circuit.append("H", [target])
             for dq in data_idxs:
@@ -170,14 +164,11 @@ class CSSCode(QuantumCode):
         # order (and therefore the emitted circuit) is deterministic across runs.
         data_set = set(self.data_qubits)
         sorted_crossings = sorted(
-            tuple(sorted(tuple(sorted(edge)) for edge in crossing))
-            for crossing in self.crossings
+            tuple(sorted(tuple(sorted(edge)) for edge in crossing)) for crossing in self.crossings
         )
         for e1, e2 in sorted_crossings:
             d1, d2 = _crossing_qubit_pair(e1, e2, data_set)
-            round_circuit.append(
-                "PAULI_CHANNEL_2", [d1, d2], self.noise.crossing
-            )
+            round_circuit.append("PAULI_CHANNEL_2", [d1, d2], self.noise.crossing)
 
         # Apply single-qubit noise.
         round_circuit.append("PAULI_CHANNEL_1", self.data_qubits, self.noise.data)
@@ -193,9 +184,7 @@ class CSSCode(QuantumCode):
         # Add initial detectors.
         if self.experiment == "z_memory":
             for k in range(len(self.z_check_qubits)):
-                c.append(
-                    "DETECTOR", [stim.target_rec(-1 - k - len(self.x_check_qubits))]
-                )
+                c.append("DETECTOR", [stim.target_rec(-1 - k - len(self.x_check_qubits))])
         elif self.experiment == "x_memory":
             for k in range(len(self.x_check_qubits)):
                 c.append("DETECTOR", [stim.target_rec(-1 - k)])
@@ -208,9 +197,7 @@ class CSSCode(QuantumCode):
                 "DETECTOR",
                 [
                     stim.target_rec(-1 - k),
-                    stim.target_rec(
-                        -1 - k - len(self.z_check_qubits + self.x_check_qubits)
-                    ),
+                    stim.target_rec(-1 - k - len(self.z_check_qubits + self.x_check_qubits)),
                 ],
             )
 
@@ -223,11 +210,7 @@ class CSSCode(QuantumCode):
             for k in range(len(self.z_check_qubits)):
                 row = self.HZ[-1 - k]
                 idxs = [i for i, v in enumerate(row) if v]
-                recs = [
-                    stim.target_rec(
-                        -1 - k - len(self.data_qubits + self.x_check_qubits)
-                    )
-                ]
+                recs = [stim.target_rec(-1 - k - len(self.data_qubits + self.x_check_qubits))]
                 for idx in idxs:
                     recs.append(stim.target_rec(idx - len(self.data_qubits)))
                 c.append("DETECTOR", recs)
@@ -245,9 +228,7 @@ class CSSCode(QuantumCode):
         x_logicals, z_logicals = self.find_logicals()
         x_logical_qubits = [np.where(log == 1)[0] for log in x_logicals]
         z_logical_qubits = [np.where(log == 1)[0] for log in z_logicals]
-        logicals = (
-            z_logical_qubits if self.experiment == "z_memory" else x_logical_qubits
-        )
+        logicals = z_logical_qubits if self.experiment == "z_memory" else x_logical_qubits
 
         if self.logical is not None:
             if isinstance(self.logical, int):
@@ -293,8 +274,7 @@ class CSSCode(QuantumCode):
 
         # Compute crossings using the utility function.
         edges = [
-            tuple(self.graph.nodes[node]["index"] for node in edge)
-            for edge in self.graph.edges
+            tuple(self.graph.nodes[node]["index"] for node in edge) for edge in self.graph.edges
         ]
         self.crossings = graph.find_edge_crossings(self.pos, edges)
 
@@ -325,9 +305,7 @@ class CSSCode(QuantumCode):
 
             logicals = np.vstack([basis, ker])
             pivots = pcm.row_echelon(logicals.T)[3]
-            indices = [
-                i for i in range(basis.shape[0], logicals.shape[0]) if i in pivots
-            ]
+            indices = [i for i in range(basis.shape[0], logicals.shape[0]) if i in pivots]
             return logicals[indices]
 
         x_logicals = _extract_logicals(self.HZ, self.HX)
@@ -336,13 +314,11 @@ class CSSCode(QuantumCode):
         # Symplectic Gram-Schmidt: pair X_Li with Z_Li so they anticommute,
         # and all cross-pairs commute. Required for correct OBSERVABLE_INCLUDE
         # assignment when k > 1.
-        x_logicals, z_logicals = self._symplectic_gram_schmidt(
-            x_logicals, z_logicals
-        )
+        x_logicals, z_logicals = self._symplectic_gram_schmidt(x_logicals, z_logicals)
 
         return x_logicals, z_logicals
 
-    def distance(self) -> int:
+    def distance(self) -> int | float:
         """
         Compute the quantum code distance by exhaustive enumeration.
 
@@ -353,8 +329,10 @@ class CSSCode(QuantumCode):
 
         Returns
         -------
-        int
-            The minimum weight of a nontrivial logical operator.
+        int | float
+            The minimum weight of a nontrivial logical operator. Returns
+            `float('inf')` if the code has no nontrivial logicals (trivial
+            code with k == 0).
 
         Raises
         ------
@@ -530,8 +508,8 @@ def _validate_binary_matrix(matrix: np.ndarray, name: str) -> None:
 
 
 def _crossing_qubit_pair(
-    e1: tuple[int, int],
-    e2: tuple[int, int],
+    e1: tuple[int, ...],
+    e2: tuple[int, ...],
     data_qubits: set[int],
 ) -> tuple[int, int]:
     """
@@ -577,9 +555,7 @@ def _crossing_qubit_pair(
     return (q1, q2) if q1 < q2 else (q2, q1)
 
 
-def _min_nontrivial_weight(
-    H_commute: np.ndarray, H_stab: np.ndarray
-) -> float:
+def _min_nontrivial_weight(H_commute: np.ndarray, H_stab: np.ndarray) -> int | float:
     """
     Minimum Hamming weight over ker(H_commute) \\ rowspace(H_stab).
 
@@ -625,7 +601,7 @@ def _min_nontrivial_weight(
 
     n = ker.shape[1]
     stab_rank = stab.shape[0]
-    min_wt = float("inf")
+    min_wt: int | float = float("inf")
 
     for r in range(1, dim_ker + 1):
         for combo in combinations(range(dim_ker), r):

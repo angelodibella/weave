@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from weave.codes.css_code import CSSCode
 from weave.codes.base import NoiseModel
+from weave.codes.css_code import CSSCode
 from weave.util import pcm
 
 
@@ -50,9 +50,7 @@ def test_steane_noisy_dem():
     H = pcm.hamming(7)
     noise = NoiseModel(data=0.001, circuit=0.001)
     code = CSSCode(HX=H, HZ=H, rounds=3, noise=noise)
-    dem = code.circuit.detector_error_model(
-        decompose_errors=True, approximate_disjoint_errors=True
-    )
+    dem = code.circuit.detector_error_model(decompose_errors=True, approximate_disjoint_errors=True)
     assert dem.num_detectors > 0
     assert dem.num_observables == 1
 
@@ -94,11 +92,13 @@ def test_lazy_circuit_invalidation_on_embed():
     H = pcm.hamming(7)
     code = CSSCode(HX=H, HZ=H, rounds=1)
     # Access circuit to trigger generation.
-    circuit_before = str(code.circuit)
+    _ = code.circuit
     assert code._circuit is not None
 
-    # Embed should invalidate.
+    # Embed should invalidate the cache.
     code.embed("random")
+    assert code._circuit is None
+
     # After embed, circuit should still be accessible (regenerated lazily).
     circuit_after = code.circuit
     sampler = circuit_after.compile_detector_sampler()
@@ -134,6 +134,7 @@ def test_logical_subset_selection():
 
 
 # ---- Validation tests ----
+
 
 def test_non_binary_hx_rejected():
     """Non-binary HX matrix should raise ValueError."""
@@ -175,6 +176,7 @@ def test_crossings_initialized_as_set():
 
 # ---- Crossing noise correctness ----
 
+
 def test_crossing_noise_targets_data_qubits():
     """Crossing noise should target data qubit pairs, not data-check pairs."""
     H = pcm.hamming(7)
@@ -192,25 +194,28 @@ def test_crossing_noise_targets_data_qubits():
         # Crossing noise appears after the last H gate and before PAULI_CHANNEL_1.
         # We check that all PAULI_CHANNEL_2 targets in the crossing section
         # are pairs of data qubits.
-        lines = circuit_str.strip().split('\n')
+        lines = circuit_str.strip().split("\n")
         for line in lines:
             line = line.strip()
             # The crossing PAULI_CHANNEL_2 has the crossing noise parameters.
             # We can identify them because circuit noise and crossing noise
             # have different parameter values.
-            if 'PAULI_CHANNEL_2' in line and '0.01' in line:
+            if "PAULI_CHANNEL_2" in line and "0.01" in line:
                 # This is crossing noise (0.15/15 = 0.01)
                 parts = line.split()
                 # targets are the two integers after PAULI_CHANNEL_2
                 targets = [int(p) for p in parts[1:] if p.isdigit()]
                 if len(targets) == 2:
-                    assert targets[0] in data_set, \
+                    assert targets[0] in data_set, (
                         f"Crossing noise target {targets[0]} is not a data qubit"
-                    assert targets[1] in data_set, \
+                    )
+                    assert targets[1] in data_set, (
                         f"Crossing noise target {targets[1]} is not a data qubit"
+                    )
 
 
 # ---- Determinism ----
+
 
 def test_embed_deterministic_with_seed():
     """embed() with a seed should produce deterministic results."""
@@ -221,12 +226,13 @@ def test_embed_deterministic_with_seed():
     code1.embed("random", seed=42)
     code2.embed("random", seed=42)
 
-    for p1, p2 in zip(code1.pos, code2.pos):
+    for p1, p2 in zip(code1.pos, code2.pos, strict=True):
         np.testing.assert_array_equal(p1, p2)
     assert code1.crossings == code2.crossings
 
 
 # ---- GF(2) rank correctness ----
+
 
 def test_gf2_rank_used_for_k():
     """Verify k is computed via GF(2) rank (not floating-point)."""
@@ -237,6 +243,7 @@ def test_gf2_rank_used_for_k():
 
 
 # ---- Quantum distance ----
+
 
 def test_steane_distance():
     """Steane code has quantum distance 3."""
@@ -259,6 +266,7 @@ def test_distance_large_nullspace_raises():
 
 # ---- n vs n_total semantics ----
 
+
 def test_steane_n_is_data_qubit_count():
     """CSSCode.n should be the data-qubit count (7 for Steane), not the total circuit size."""
     H = pcm.hamming(7)
@@ -270,6 +278,7 @@ def test_steane_n_is_data_qubit_count():
 
 
 # ---- Symplectic Gram-Schmidt defensive check ----
+
 
 def test_symplectic_gs_raises_on_degenerate_input():
     """_symplectic_gram_schmidt should raise if no Z anticommutes with some X."""

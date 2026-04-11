@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .graph_model import GraphModel, GraphData, QUANTUM_TYPES
+from .graph_model import GraphData, GraphModel
 
 
 def validate_quantum_graph(
@@ -34,9 +34,11 @@ def validate_quantum_graph(
         If the graph lacks the necessary quantum node types.
     """
     nodes = model.nodes if node_ids is None else [n for n in model.nodes if n["id"] in node_ids]
-    edges = model.edges if node_ids is None else [
-        e for e in model.edges if e["source"] in node_ids and e["target"] in node_ids
-    ]
+    edges = (
+        model.edges
+        if node_ids is None
+        else [e for e in model.edges if e["source"] in node_ids and e["target"] in node_ids]
+    )
 
     qubit_nodes = sorted([n for n in nodes if n["type"] == "qubit"], key=lambda n: n["id"])
     z_nodes = sorted([n for n in nodes if n["type"] == "Z_stabilizer"], key=lambda n: n["id"])
@@ -104,9 +106,7 @@ def graph_to_css_code(
             HX[x_id_to_row[src_id], qubit_id_to_col[tgt_id]] = 1
 
     pos_list = (
-        [n["pos"] for n in qubit_nodes]
-        + [n["pos"] for n in z_nodes]
-        + [n["pos"] for n in x_nodes]
+        [n["pos"] for n in qubit_nodes] + [n["pos"] for n in z_nodes] + [n["pos"] for n in x_nodes]
     )
 
     code = CSSCode(HX=HX, HZ=HZ)
@@ -155,45 +155,61 @@ def css_code_to_model(
     node_id = 0
 
     for i in code.data_qubits:
-        model.nodes.append({
-            "id": node_id, "pos": scaled(all_pos[i]),
-            "type": "qubit", "selected": False,
-        })
+        model.nodes.append(
+            {
+                "id": node_id,
+                "pos": scaled(all_pos[i]),
+                "type": "qubit",
+                "selected": False,
+            }
+        )
         node_id += 1
 
     for i in code.z_check_qubits:
-        model.nodes.append({
-            "id": node_id, "pos": scaled(all_pos[i]),
-            "type": "Z_stabilizer", "selected": False,
-        })
+        model.nodes.append(
+            {
+                "id": node_id,
+                "pos": scaled(all_pos[i]),
+                "type": "Z_stabilizer",
+                "selected": False,
+            }
+        )
         node_id += 1
 
     for i in code.x_check_qubits:
-        model.nodes.append({
-            "id": node_id, "pos": scaled(all_pos[i]),
-            "type": "X_stabilizer", "selected": False,
-        })
+        model.nodes.append(
+            {
+                "id": node_id,
+                "pos": scaled(all_pos[i]),
+                "type": "X_stabilizer",
+                "selected": False,
+            }
+        )
         node_id += 1
 
     # Edges from HZ.
     for row_idx in range(code.HZ.shape[0]):
         for col_idx in range(code.HZ.shape[1]):
             if code.HZ[row_idx, col_idx]:
-                model.edges.append({
-                    "source": col_idx,
-                    "target": num_data + row_idx,
-                    "selected": False,
-                })
+                model.edges.append(
+                    {
+                        "source": col_idx,
+                        "target": num_data + row_idx,
+                        "selected": False,
+                    }
+                )
 
     # Edges from HX.
     for row_idx in range(code.HX.shape[0]):
         for col_idx in range(code.HX.shape[1]):
             if code.HX[row_idx, col_idx]:
-                model.edges.append({
-                    "source": col_idx,
-                    "target": num_data + num_z + row_idx,
-                    "selected": False,
-                })
+                model.edges.append(
+                    {
+                        "source": col_idx,
+                        "target": num_data + num_z + row_idx,
+                        "selected": False,
+                    }
+                )
 
     model.model_changed.emit()
 
@@ -264,7 +280,7 @@ def load_code_json(model: GraphModel, file_path: str) -> dict[str, Any]:
     """
     from ..codes.css_code import CSSCode
 
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         data = json.load(f)
 
     hx = np.array(data["hx"], dtype=int)

@@ -1,6 +1,6 @@
+from PySide6.QtCore import Property, QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QPen, QColor, QRadialGradient, QPainterPath
-from PySide6.QtCore import Qt, QPointF, QRectF, QPropertyAnimation, QEasingCurve, Signal, Property
 
 
 class ToggleSwitch(QWidget):
@@ -66,7 +66,9 @@ class ToggleSwitch(QWidget):
 
         # Calculate rounded rectangle path for proper shadow and background.
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, rect.width(), rect.height()), rect.height() / 2, rect.height() / 2)
+        path.addRoundedRect(
+            QRectF(0, 0, rect.width(), rect.height()), rect.height() / 2, rect.height() / 2
+        )
 
         # Draw shadow.
         painter.save()
@@ -168,31 +170,46 @@ class MenuIcon(QWidget):
         # Animations from hamburger to X.
         if self._open_state == 0:
             # Draw three lines.
-            painter.drawLine(center_x - line_length / 2, center_y - line_spacing,
-                             center_x + line_length / 2, center_y - line_spacing)
-            painter.drawLine(center_x - line_length / 2, center_y,
-                             center_x + line_length / 2, center_y)
-            painter.drawLine(center_x - line_length / 2, center_y + line_spacing,
-                             center_x + line_length / 2, center_y + line_spacing)
+            painter.drawLine(
+                center_x - line_length / 2,
+                center_y - line_spacing,
+                center_x + line_length / 2,
+                center_y - line_spacing,
+            )
+            painter.drawLine(
+                center_x - line_length / 2, center_y, center_x + line_length / 2, center_y
+            )
+            painter.drawLine(
+                center_x - line_length / 2,
+                center_y + line_spacing,
+                center_x + line_length / 2,
+                center_y + line_spacing,
+            )
         else:
             # Top line transforms to \ part of X.
             painter.drawLine(
                 center_x - line_length / 2,
                 center_y - line_spacing + self._open_state * (line_spacing * 2),
                 center_x + line_length / 2,
-                center_y + line_spacing - self._open_state * (line_spacing * 2)
+                center_y + line_spacing - self._open_state * (line_spacing * 2),
             )
 
             # Middle line fades out.
             if self._open_state < 1.0:
-                pen.setColor(QColor(pen_color.red(), pen_color.green(), pen_color.blue(),
-                                    int(255 * (1 - self._open_state))))
+                pen.setColor(
+                    QColor(
+                        pen_color.red(),
+                        pen_color.green(),
+                        pen_color.blue(),
+                        int(255 * (1 - self._open_state)),
+                    )
+                )
                 painter.setPen(pen)
                 painter.drawLine(
                     center_x - line_length / 2 + self._open_state * (line_length / 2),
                     center_y,
                     center_x + line_length / 2 - self._open_state * (line_length / 2),
-                    center_y
+                    center_y,
                 )
                 pen.setColor(pen_color)
                 painter.setPen(pen)
@@ -202,5 +219,5 @@ class MenuIcon(QWidget):
                 center_x - line_length / 2,
                 center_y + line_spacing - self._open_state * (line_spacing * 2),
                 center_x + line_length / 2,
-                center_y - line_spacing + self._open_state * (line_spacing * 2)
+                center_y - line_spacing + self._open_state * (line_spacing * 2),
             )

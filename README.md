@@ -20,7 +20,7 @@ Weave builds CSS codes and hypergraph product codes, embeds their Tanner graphs 
 git clone https://github.com/angelodibella/weave.git
 cd weave
 uv sync                  # install all dependencies
-uv run pytest            # verify — should pass 77 tests
+uv run pytest            # verify — should pass 109 tests
 ```
 
 ---
@@ -244,7 +244,7 @@ weave/
 ├── surface/
 │   ├── base.py                  # Surface ABC
 │   └── torus.py                 # Torus implementation
-├── tests/                       # 77 tests across 6 files
+├── tests/                       # 109 tests across 7 files
 └── util/
     ├── graph.py                 # Tanner graph layout, crossings, drawing
     └── pcm.py                   # GF(2) linear algebra and code constructions
@@ -259,15 +259,31 @@ weave/
 
 ---
 
-## Testing
+## Development
+
+Install the full development toolchain (lint, typecheck, coverage, pre-commit hooks):
 
 ```bash
-uv run pytest                  # run all 77 tests
-uv run pytest -v               # verbose output
-uv run pytest weave/tests/test_pcm.py  # single file
+uv sync --extra dev         # installs pytest, pytest-cov, ruff, mypy, pre-commit
+uv run pre-commit install   # one-time: install git hooks
 ```
 
-Test coverage includes: Steane code circuit correctness, noiseless detector validation, noisy detector error models, logical operator validity with symplectic pairing, lazy circuit generation/invalidation, CSS condition enforcement, input validation (binary matrices, rounds, experiment type, noise bounds), noise model edge cases (negative values, sum > 1, immutability), crossing noise correctness (data-qubit targeting), deterministic embedding with seeds, hypergraph product parameter verification, GF(2) linear algebra, canvas-to-code bridge roundtrips, and code distance computation (including k > 1 combination enumeration).
+### Commands
+
+```bash
+uv run pytest                           # run all 109 tests
+uv run pytest -v                        # verbose output
+uv run pytest weave/tests/test_pcm.py   # single file
+uv run pytest --cov=weave               # with coverage
+
+uv run ruff check weave/                # lint
+uv run ruff format weave/               # format (idempotent)
+uv run mypy weave/codes weave/util weave/surface   # typecheck the core modules
+```
+
+### What's tested
+
+Steane code circuit correctness, noiseless detector validation, noisy detector error models, logical operator validity with symplectic pairing, lazy circuit generation/invalidation, CSS condition enforcement, input validation (binary matrices, rounds, experiment type, noise bounds), noise model edge cases (negative values, sum > 1, immutability), crossing noise correctness (data-qubit targeting, deterministic iteration order), deterministic embedding with seeds, quantum code distance, `n` vs `n_total` semantics, symplectic Gram-Schmidt defensive check, hypergraph product parameter verification, GF(2) linear algebra, canvas-to-code bridge roundtrips, and classical distance computation (including k > 1 combination enumeration).
 
 ---
 

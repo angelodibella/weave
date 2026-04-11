@@ -1,21 +1,21 @@
 """Tests for the code_bridge module."""
 
 import sys
-import json
 import tempfile
 
 import numpy as np
 import pytest
 
-from weave.util import pcm
 from weave.codes.css_code import CSSCode
-from weave.gui.graph_model import GraphModel
 from weave.gui import code_bridge
+from weave.gui.graph_model import GraphModel
+from weave.util import pcm
 
 
 @pytest.fixture(scope="module")
 def qapp():
     from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -32,17 +32,32 @@ def _build_steane_model(model):
     H = pcm.hamming(7)
 
     for i in range(7):
-        model.nodes.append({
-            "id": i, "pos": (i * 30.0, 0.0), "type": "qubit", "selected": False,
-        })
+        model.nodes.append(
+            {
+                "id": i,
+                "pos": (i * 30.0, 0.0),
+                "type": "qubit",
+                "selected": False,
+            }
+        )
     for j in range(3):
-        model.nodes.append({
-            "id": 7 + j, "pos": (j * 60.0, 50.0), "type": "Z_stabilizer", "selected": False,
-        })
+        model.nodes.append(
+            {
+                "id": 7 + j,
+                "pos": (j * 60.0, 50.0),
+                "type": "Z_stabilizer",
+                "selected": False,
+            }
+        )
     for k in range(3):
-        model.nodes.append({
-            "id": 10 + k, "pos": (k * 60.0, -50.0), "type": "X_stabilizer", "selected": False,
-        })
+        model.nodes.append(
+            {
+                "id": 10 + k,
+                "pos": (k * 60.0, -50.0),
+                "type": "X_stabilizer",
+                "selected": False,
+            }
+        )
 
     for j in range(3):
         for i in range(7):
@@ -114,7 +129,8 @@ def test_save_load_code_json(model):
         path = f.name
 
     code_bridge.save_code_json(
-        model, path,
+        model,
+        path,
         noise_config={"data": 0.001, "circuit": 0.002},
         logical_indices=[0],
         name="Test Steane",

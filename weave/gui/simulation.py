@@ -3,27 +3,37 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import numpy as np
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QDoubleSpinBox,
-    QSpinBox, QComboBox, QPushButton, QProgressBar, QGroupBox,
-    QFormLayout, QFrame, QTabWidget, QWidget, QCheckBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QThread, Signal
 
-from ..codes.css_code import CSSCode
 from ..codes.base import NoiseModel
+from ..codes.css_code import CSSCode
 from .graph_model import GraphData
 
 
 class SimulationWorker(QThread):
     """Background worker that runs a sinter simulation."""
 
-    progress = Signal(int, int)     # (shots_so_far, total)
-    finished = Signal(object)       # sinter.TaskStats
+    progress = Signal(int, int)  # (shots_so_far, total)
+    finished = Signal(object)  # sinter.TaskStats
     error = Signal(str)
 
     def __init__(self, circuit, shots, decoder="bposd"):
@@ -122,10 +132,9 @@ class LogicalSelectionWidget(QWidget):
         self.checkboxes: list[QCheckBox] = []
 
         try:
-            x_logicals, z_logicals = code.find_logicals()
+            x_logicals, _ = code.find_logicals()
         except Exception:
             x_logicals = np.zeros((0, code.HX.shape[1]), dtype=int)
-            z_logicals = np.zeros((0, code.HZ.shape[1]), dtype=int)
 
         for i in range(k):
             # Build support info string.
@@ -250,6 +259,7 @@ class SimulationDialog(QDialog):
         self.decoder_combo = QComboBox()
         try:
             import pymatching  # noqa: F401
+
             self.decoder_combo.addItem("pymatching")
         except ImportError:
             pass

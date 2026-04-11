@@ -60,19 +60,11 @@ class NoiseModel:
         circuit: float | list[float] = 0.0,
         crossing: float | list[float] = 0.0,
     ) -> None:
-        self.circuit = self._process_noise(
-            circuit, expected=15, name="Circuit", divisor=15
-        )
+        self.circuit = self._process_noise(circuit, expected=15, name="Circuit", divisor=15)
         self.data = self._process_noise(data, expected=3, name="Data qubit", divisor=3)
-        self.crossing = self._process_noise(
-            crossing, expected=15, name="Crossing", divisor=15
-        )
-        self.z_check = self._process_noise(
-            z_check, expected=3, name="Z-check", divisor=3
-        )
-        self.x_check = self._process_noise(
-            x_check, expected=3, name="X-check", divisor=3
-        )
+        self.crossing = self._process_noise(crossing, expected=15, name="Crossing", divisor=15)
+        self.z_check = self._process_noise(z_check, expected=3, name="Z-check", divisor=3)
+        self.x_check = self._process_noise(x_check, expected=3, name="X-check", divisor=3)
 
     @staticmethod
     def _process_noise(
@@ -106,20 +98,14 @@ class NoiseModel:
         """
         if isinstance(param, (int, float)):
             if param < 0:
-                raise ValueError(
-                    f"{name} noise parameter must be non-negative, got {param}."
-                )
+                raise ValueError(f"{name} noise parameter must be non-negative, got {param}.")
             values = [param / divisor for _ in range(expected)]
         else:
             if len(param) != expected:
-                raise ValueError(
-                    f"{name} noise takes {expected} parameters, given {len(param)}."
-                )
+                raise ValueError(f"{name} noise takes {expected} parameters, given {len(param)}.")
             for i, v in enumerate(param):
                 if v < 0:
-                    raise ValueError(
-                        f"{name} noise parameter[{i}] must be non-negative, got {v}."
-                    )
+                    raise ValueError(f"{name} noise parameter[{i}] must be non-negative, got {v}.")
             values = list(param)
 
         total = sum(values)
@@ -152,24 +138,22 @@ class ClassicalCode:
     def _validate_matrix(self) -> None:
         """Validate that the parity check matrix is binary."""
         if not np.all(np.logical_or(self.H == 0, self.H == 1)):
-            raise ValueError(
-                "Parity check matrix must be binary (contain only 0s and 1s)"
-            )
+            raise ValueError("Parity check matrix must be binary (contain only 0s and 1s)")
 
     @property
     def n(self) -> int:
         """The block length of the code."""
-        return self.H.shape[1]
+        return int(self.H.shape[1])
 
     @property
     def k(self) -> int:
         """The dimension of the code."""
-        return self.n - pcm.row_echelon(self.H)[1]
+        return int(self.n - pcm.row_echelon(self.H)[1])
 
     @property
     def m(self) -> int:
         """The number of parity checks."""
-        return self.H.shape[0]
+        return int(self.H.shape[0])
 
 
 class QuantumCode(ABC):

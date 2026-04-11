@@ -1,17 +1,17 @@
 """Tests for the GraphModel data model."""
 
 import sys
-import json
 import tempfile
 
 import pytest
 
-from weave.gui.graph_model import GraphModel, GraphData, is_valid_connection, QUANTUM_TYPES
+from weave.gui.graph_model import GraphModel, is_valid_connection
 
 
 @pytest.fixture(scope="module")
 def qapp():
     from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -24,6 +24,7 @@ def model(qapp):
 
 
 # ---- is_valid_connection ----
+
 
 def test_qubit_to_z_stabilizer():
     src = {"type": "qubit"}
@@ -57,6 +58,7 @@ def test_mixed_quantum_classical_invalid():
 
 # ---- Node operations ----
 
+
 def test_add_node(model):
     node = model.add_node(10.0, 20.0, "qubit")
     assert node["id"] == 0
@@ -79,6 +81,7 @@ def test_next_node_id(model):
 
 # ---- Edge operations ----
 
+
 def test_add_edge(model):
     model.add_node(0, 0, "qubit")
     model.add_node(10, 0, "Z_stabilizer")
@@ -99,6 +102,7 @@ def test_edge_exists(model):
 
 # ---- Selection ----
 
+
 def test_deselect_all(model):
     model.add_node(0, 0, "qubit")
     model.nodes[0]["selected"] = True
@@ -114,6 +118,7 @@ def test_selected_nodes(model):
 
 
 # ---- Graph detection ----
+
 
 def _build_triangle(model):
     """Build 3 connected quantum nodes."""
@@ -161,6 +166,7 @@ def test_update_graphs_removes_small(model):
 
 # ---- Delete ----
 
+
 def test_delete_selected_nodes(model):
     _build_triangle(model)
     model.nodes[0]["selected"] = True
@@ -180,6 +186,7 @@ def test_delete_selected_edges(model):
 
 # ---- Clipboard ----
 
+
 def test_copy_paste(model):
     _build_triangle(model)
     for n in model.nodes:
@@ -191,6 +198,7 @@ def test_copy_paste(model):
 
 
 # ---- Serialization ----
+
 
 def test_save_load(model):
     _build_triangle(model)
@@ -211,6 +219,7 @@ def test_save_load(model):
 
 
 # ---- Clear ----
+
 
 def test_clear(model):
     _build_triangle(model)

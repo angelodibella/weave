@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from weave.codes.hypergraph_product_code import HypergraphProductCode
 from weave.codes.base import NoiseModel
+from weave.codes.hypergraph_product_code import HypergraphProductCode
 from weave.util import pcm
 
 
@@ -65,9 +65,7 @@ def test_hp_code_noisy_dem(rep3_matrices):
     H1, H2 = rep3_matrices
     noise = NoiseModel(data=0.01, circuit=0.01)
     code = HypergraphProductCode(H1, H2, rounds=3, noise=noise)
-    dem = code.circuit.detector_error_model(
-        decompose_errors=True, approximate_disjoint_errors=True
-    )
+    dem = code.circuit.detector_error_model(decompose_errors=True, approximate_disjoint_errors=True)
     assert dem.num_detectors > 0
     assert dem.num_observables == 1
 
@@ -112,8 +110,7 @@ def test_hp_code_logicals_symplectic_pairing(rep3_hamming7_matrices):
 
     comm_matrix = (x_logicals @ z_logicals.T) % 2
     np.testing.assert_array_equal(
-        comm_matrix, np.eye(k, dtype=int),
-        err_msg="Logical operators are not in a symplectic basis"
+        comm_matrix, np.eye(k, dtype=int), err_msg="Logical operators are not in a symplectic basis"
     )
 
 
@@ -155,11 +152,13 @@ def test_hp_code_embed(rep3_matrices):
     """Verify that embed() works and regenerates the circuit."""
     H1, H2 = rep3_matrices
     code = HypergraphProductCode(H1, H2, rounds=2)
-    circuit_before = str(code.circuit)
+    _ = code.circuit
+    assert code._circuit is not None
 
     code.embed("random")
     assert code.graph is not None
     assert code.pos is not None
+    assert code._circuit is None  # cache invalidated by embed()
 
     # Circuit should still be valid after re-embedding
     sampler = code.circuit.compile_detector_sampler()

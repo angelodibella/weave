@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from weave.codes.base import NoiseModel
 
 
@@ -25,8 +26,13 @@ def test_noise_model_list():
     circuit_list = [0.01] * 15
     crossing_list = [0.02] * 15
 
-    nm = NoiseModel(data=data_list, z_check=data_list, x_check=data_list,
-                    circuit=circuit_list, crossing=crossing_list)
+    nm = NoiseModel(
+        data=data_list,
+        z_check=data_list,
+        x_check=data_list,
+        circuit=circuit_list,
+        crossing=crossing_list,
+    )
 
     np.testing.assert_almost_equal(nm.data, data_list)
     np.testing.assert_almost_equal(nm.circuit, circuit_list)
