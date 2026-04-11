@@ -18,9 +18,17 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from ..geometry import Point3
+from .route import RouteID
 
 IREdge = tuple[int, int]
-"""A directed Tanner-graph edge: `(source_qubit_idx, target_qubit_idx)`."""
+"""A directed Tanner-graph edge: `(source_qubit_idx, target_qubit_idx)`.
+
+This is the legacy PR 2 route identifier. PR 4 introduced
+:class:`~weave.ir.route.RouteID` as the structured replacement.
+`RoutingGeometry` and the :class:`Embedding` protocol accept both for
+backward compatibility: tuple inputs are auto-lifted to a `RouteID`
+with `step_tick=0`, `term_name=None`, `instance=0`.
+"""
 
 IRPolyline = tuple[Point3, ...]
 """An immutable polyline: a tuple of 3D points."""
@@ -31,23 +39,31 @@ class RoutingGeometry:
     """Routed polylines for a set of active Tanner-graph edges.
 
     Produced by :meth:`Embedding.routing_geometry` as a map from
-    `(source, target)` qubit pairs to the 3D polyline traversed by that
-    edge's physical wire.
+    :class:`~weave.ir.route.RouteID` values to the 3D polyline
+    traversed by that edge's physical wire.
+
+    Backward compatibility
+    ----------------------
+    Legacy `(source, target)` tuple keys are accepted in the
+    constructor and auto-lifted to `RouteID(source, target, 0, None, 0)`
+    in `__post_init__`. `__contains__` and `__getitem__` accept either
+    a `RouteID` or a tuple; tuple lookups match the lifted default
+    metadata (`step_tick=0`, `term_name=None`, `instance=0`).
 
     Notes
     -----
     The `edges` field is a mutable dict, so `RoutingGeometry` is
     declared frozen but is **not** hashable at runtime: calling
     `hash(rg)` raises `TypeError`. Frozen here protects field
-    reassignment only. The convention is that the dict contents are
-    not mutated after construction; callers that need true immutability
-    should treat it as read-only.
+    reassignment only.
 
     Parameters
     ----------
-    edges : dict[tuple[int, int], tuple[Point3, ...]]
-        Map from Tanner-graph edges to their 3D routed polylines. Every
-        polyline must contain at least 2 points.
+    edges : dict
+        Map from routes to their 3D routed polylines. Keys may be
+        `RouteID` instances (preferred) or `(source, target)` tuples
+        (lifted to `RouteID` with default metadata). Every polyline
+        must contain at least 2 points.
     name : str, optional
         Label for provenance and debugging; empty by default.
 
@@ -55,26 +71,52 @@ class RoutingGeometry:
     ------
     ValueError
         If any polyline has fewer than 2 points.
+    TypeError
+        If a key is neither a `RouteID` nor a 2-tuple of ints.
     """
 
-    edges: dict[IREdge, IRPolyline]
+    edges: dict[RouteID, IRPolyline]
     name: str = ""
 
     def __post_init__(self) -> None:
-        for edge, poly in self.edges.items():
+        # Lift tuple keys to RouteID for backward compatibility.
+        lifted: dict[RouteID, IRPolyline] = {}
+        for key, poly in self.edges.items():
+            if isinstance(key, RouteID):
+                rid = key
+            elif isinstance(key, tuple) and len(key) == 2:
+                rid = RouteID(source=int(key[0]), target=int(key[1]))
+            else:
+                raise TypeError(
+                    f"RoutingGeometry edge key must be RouteID or (source, target) "
+                    f"tuple, got {type(key).__name__}: {key!r}"
+                )
             if len(poly) < 2:
                 raise ValueError(
-                    f"Polyline for edge {edge} must have at least 2 points, got {len(poly)}."
+                    f"Polyline for edge {rid} must have at least 2 points, got {len(poly)}."
                 )
+            lifted[rid] = poly
+        object.__setattr__(self, "edges", lifted)
 
     def __len__(self) -> int:
         return len(self.edges)
 
-    def __contains__(self, edge: object) -> bool:
-        return edge in self.edges
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, RouteID):
+            return key in self.edges
+        if isinstance(key, tuple) and len(key) == 2:
+            return RouteID(source=int(key[0]), target=int(key[1])) in self.edges
+        return False
 
-    def __getitem__(self, edge: IREdge) -> IRPolyline:
-        return self.edges[edge]
+    def __getitem__(self, key: RouteID | IREdge) -> IRPolyline:
+        if isinstance(key, RouteID):
+            return self.edges[key]
+        if isinstance(key, tuple) and len(key) == 2:
+            return self.edges[RouteID(source=int(key[0]), target=int(key[1]))]
+        raise TypeError(
+            f"RoutingGeometry key must be RouteID or (source, target) tuple, "
+            f"got {type(key).__name__}: {key!r}"
+        )
 
 
 @runtime_checkable
@@ -127,18 +169,21 @@ class Embedding(Protocol):
         """Return the 3D position of a qubit."""
         ...
 
-    def routing_geometry(self, active_edges: Sequence[IREdge]) -> RoutingGeometry:
+    def routing_geometry(self, active_edges: Sequence[RouteID | IREdge]) -> RoutingGeometry:
         """Return routed polylines for the given active edges.
 
         Parameters
         ----------
-        active_edges : Sequence[tuple[int, int]]
-            Ordered sequence of `(source, target)` edges to route.
+        active_edges : Sequence[RouteID | tuple[int, int]]
+            Ordered sequence of routes to lay out. Each entry may be a
+            :class:`~weave.ir.route.RouteID` (preferred) or a legacy
+            `(source, target)` tuple (auto-lifted).
 
         Returns
         -------
         RoutingGeometry
-            A map from each requested edge to its routed polyline.
+            A map from each requested route to its routed polyline,
+            keyed by `RouteID`.
         """
         ...
 

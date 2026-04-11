@@ -17,6 +17,7 @@ from weave.ir import (
     Embedding,
     IREdge,
     JsonPolylineEmbedding,
+    RouteID,
     RoutingGeometry,
     StraightLineEmbedding,
     load_embedding,
@@ -439,3 +440,116 @@ class TestSteaneAcceptance:
             (3.0, 4.0, 0.0),
             (6.0, 0.0, 0.0),
         )
+
+
+# =============================================================================
+# PR 4 backward-compat: RouteID upgrade
+# =============================================================================
+
+
+class TestRouteIDBackwardCompat:
+    """Verify the PR 4 `RouteID` upgrade preserves PR 2's tuple-keyed API."""
+
+    def test_routing_geometry_stores_route_ids_internally(self):
+        """Tuple input is auto-lifted to RouteID in __post_init__."""
+        rg = RoutingGeometry(edges={(0, 1): ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))})
+        # After lift, the dict is keyed by RouteID.
+        assert list(rg.edges.keys())[0] == RouteID(source=0, target=1)
+
+    def test_routing_geometry_accepts_route_id_input(self):
+        """Native RouteID input flows through without lifting."""
+        rid = RouteID(source=0, target=1, step_tick=3, term_name="B1")
+        rg = RoutingGeometry(edges={rid: ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))})
+        # The RouteID is preserved with its metadata.
+        stored = list(rg.edges.keys())[0]
+        assert stored == rid
+        assert stored.step_tick == 3
+        assert stored.term_name == "B1"
+
+    def test_routing_geometry_tuple_contains_works(self):
+        rg = RoutingGeometry(edges={(0, 1): ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))})
+        assert (0, 1) in rg
+        assert (0, 2) not in rg
+
+    def test_routing_geometry_route_id_contains_works(self):
+        rg = RoutingGeometry(
+            edges={RouteID(source=0, target=1): ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))}
+        )
+        assert RouteID(source=0, target=1) in rg
+        assert RouteID(source=0, target=1, step_tick=5) not in rg
+
+    def test_routing_geometry_tuple_getitem_works(self):
+        rg = RoutingGeometry(edges={(0, 1): ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))})
+        assert rg[(0, 1)] == ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+
+    def test_routing_geometry_route_id_getitem_works(self):
+        rid = RouteID(source=0, target=1, step_tick=3)
+        rg = RoutingGeometry(edges={rid: ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))})
+        assert rg[rid] == ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+
+    def test_routing_geometry_rejects_bad_key_type(self):
+        with pytest.raises(TypeError, match="must be RouteID"):
+            RoutingGeometry(
+                edges={"bad": ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))}  # type: ignore[dict-item]
+            )
+
+    def test_straight_line_accepts_tuple_input(self):
+        """PR 4 acceptance test 5a: StraightLineEmbedding accepts tuple input."""
+        emb = StraightLineEmbedding.from_positions([(0, 0), (1, 0), (2, 0), (3, 0)])
+        rg = emb.routing_geometry([(0, 1), (2, 3)])
+        assert len(rg) == 2
+        # Result is keyed by RouteID with default metadata.
+        assert RouteID(source=0, target=1) in rg.edges
+        assert RouteID(source=2, target=3) in rg.edges
+
+    def test_straight_line_accepts_route_id_input(self):
+        """PR 4 acceptance test 5b: StraightLineEmbedding accepts RouteID input."""
+        emb = StraightLineEmbedding.from_positions([(0, 0), (1, 0), (2, 0), (3, 0)])
+        rg = emb.routing_geometry([RouteID(source=0, target=1), RouteID(source=2, target=3)])
+        assert len(rg) == 2
+
+    def test_straight_line_tuple_and_route_id_equivalent(self):
+        """PR 4 acceptance test 5c: tuple and RouteID inputs give equivalent geometries."""
+        emb = StraightLineEmbedding.from_positions([(0, 0), (1, 0), (2, 0), (3, 0)])
+        rg_tuple = emb.routing_geometry([(0, 1), (2, 3)])
+        rg_route = emb.routing_geometry([RouteID(source=0, target=1), RouteID(source=2, target=3)])
+        # Both should have the same set of RouteID keys (since tuples lift to
+        # default-metadata RouteID).
+        assert set(rg_tuple.edges.keys()) == set(rg_route.edges.keys())
+        # And the polylines are identical.
+        for rid in rg_tuple.edges:
+            assert rg_tuple.edges[rid] == rg_route.edges[rid]
+
+    def test_json_polyline_accepts_route_id_storage(self):
+        """JsonPolylineEmbedding accepts RouteID keys in edge_polylines."""
+        emb = JsonPolylineEmbedding(
+            positions={0: (0.0, 0.0, 0.0), 1: (1.0, 0.0, 0.0)},
+            edge_polylines={
+                RouteID(source=0, target=1, step_tick=3, term_name="B1"): (
+                    (0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0),
+                ),
+            },
+        )
+        rid = RouteID(source=0, target=1, step_tick=3, term_name="B1")
+        rg = emb.routing_geometry([rid])
+        assert rid in rg.edges
+
+    def test_json_polyline_roundtrip_preserves_route_id_metadata(self):
+        """JsonPolylineEmbedding JSON round-trip preserves step_tick / term_name / instance."""
+        emb = JsonPolylineEmbedding(
+            positions={0: (0.0, 0.0, 0.0), 1: (1.0, 0.0, 0.0)},
+            edge_polylines={
+                RouteID(source=0, target=1, step_tick=3, term_name="B1", instance=2): (
+                    (0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0),
+                ),
+            },
+        )
+        restored = JsonPolylineEmbedding.from_json(emb.to_json())
+        stored = list(restored.edge_polylines.keys())[0]
+        assert stored.source == 0
+        assert stored.target == 1
+        assert stored.step_tick == 3
+        assert stored.term_name == "B1"
+        assert stored.instance == 2

@@ -14,6 +14,7 @@ from typing import Any, ClassVar
 
 from ...geometry import Point3
 from ..embedding import IREdge, IRPolyline, RoutingGeometry
+from ..route import RouteID
 
 
 def _to_point3(p: Sequence[float]) -> Point3:
@@ -101,15 +102,22 @@ class StraightLineEmbedding:
             raise IndexError(f"qubit_idx {qubit_idx} out of range [0, {len(self.positions)}).")
         return self.positions[qubit_idx]
 
-    def routing_geometry(self, active_edges: Sequence[IREdge]) -> RoutingGeometry:
-        edges_map: dict[IREdge, IRPolyline] = {}
+    def routing_geometry(self, active_edges: Sequence[RouteID | IREdge]) -> RoutingGeometry:
+        edges_map: dict[RouteID, IRPolyline] = {}
         n = len(self.positions)
-        for u, v in active_edges:
+        for item in active_edges:
+            if isinstance(item, RouteID):
+                rid = item
+                u, v = rid.source, rid.target
+            else:
+                # Legacy: (source, target) tuple
+                u, v = item
+                rid = RouteID(source=int(u), target=int(v))
             if not 0 <= u < n:
                 raise IndexError(f"Edge source {u} out of range [0, {n}).")
             if not 0 <= v < n:
                 raise IndexError(f"Edge target {v} out of range [0, {n}).")
-            edges_map[(u, v)] = (self.positions[u], self.positions[v])
+            edges_map[rid] = (self.positions[u], self.positions[v])
         return RoutingGeometry(edges=edges_map, name=self.name)
 
     # ------------------------------------------------------------------

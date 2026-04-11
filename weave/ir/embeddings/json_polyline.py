@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from ...geometry import Point3
 from ..embedding import IREdge, IRPolyline, RoutingGeometry
+from ..route import RouteID, route_id_sort_key
 
 
 def _to_point3(p: Sequence[float]) -> Point3:
@@ -35,20 +36,27 @@ def _to_polyline(points: Sequence[Sequence[float]]) -> IRPolyline:
 
 @dataclass(frozen=True)
 class JsonPolylineEmbedding:
-    """Embedding backed by a precomputed map from edges to polylines.
+    """Embedding backed by a precomputed map from routes to polylines.
 
     Unlike :class:`StraightLineEmbedding`, every edge can have its own
     multi-segment polyline — useful for biplanar routes, surface
     geodesics exported as polyline approximations, or any layout that
     weave does not yet know how to generate natively.
 
+    Backward compatibility
+    ----------------------
+    Both the constructor and `routing_geometry` accept either
+    :class:`~weave.ir.route.RouteID` keys or legacy `(source, target)`
+    tuple keys. Tuple keys are auto-lifted to `RouteID` with default
+    metadata (`step_tick=0`, `term_name=None`, `instance=0`).
+
     Parameters
     ----------
     positions : dict[int, Point3]
         Per-qubit 3D positions.
-    edge_polylines : dict[tuple[int, int], tuple[Point3, ...]]
-        Routed polylines keyed by `(source, target)`. Each polyline
-        must contain at least 2 points.
+    edge_polylines : dict[RouteID | tuple[int, int], tuple[Point3, ...]]
+        Routed polylines keyed by `RouteID` or legacy tuple. Each
+        polyline must contain at least 2 points.
     name : str, optional
         Label for provenance and debugging; defaults to
         ``"json_polyline"``.
@@ -56,23 +64,34 @@ class JsonPolylineEmbedding:
     Notes
     -----
     Both internal storage fields are dicts, so this embedding is
-    declared frozen but is **not** hashable at runtime. Frozen here
-    protects field reassignment only; the convention is that the dicts
-    are not mutated after construction.
+    declared frozen but is **not** hashable at runtime.
     """
 
     SCHEMA_VERSION: ClassVar[int] = 1
 
     positions: dict[int, Point3]
-    edge_polylines: dict[IREdge, IRPolyline]
+    edge_polylines: dict[RouteID, IRPolyline]
     name: str = "json_polyline"
 
     def __post_init__(self) -> None:
-        for edge, poly in self.edge_polylines.items():
+        # Lift tuple keys to RouteID for backward compatibility.
+        lifted: dict[RouteID, IRPolyline] = {}
+        for key, poly in self.edge_polylines.items():
+            if isinstance(key, RouteID):
+                rid = key
+            elif isinstance(key, tuple) and len(key) == 2:
+                rid = RouteID(source=int(key[0]), target=int(key[1]))
+            else:
+                raise TypeError(
+                    f"edge_polylines key must be RouteID or (source, target) tuple, "
+                    f"got {type(key).__name__}: {key!r}"
+                )
             if len(poly) < 2:
                 raise ValueError(
-                    f"Polyline for edge {edge} must have at least 2 points, got {len(poly)}."
+                    f"Polyline for edge {rid} must have at least 2 points, got {len(poly)}."
                 )
+            lifted[rid] = poly
+        object.__setattr__(self, "edge_polylines", lifted)
 
     # ------------------------------------------------------------------
     # Embedding protocol
@@ -91,15 +110,18 @@ class JsonPolylineEmbedding:
             raise IndexError(f"No position defined for qubit {qubit_idx}.")
         return self.positions[qubit_idx]
 
-    def routing_geometry(self, active_edges: Sequence[IREdge]) -> RoutingGeometry:
-        edges_map: dict[IREdge, IRPolyline] = {}
-        for edge in active_edges:
-            if edge not in self.edge_polylines:
-                raise KeyError(
-                    f"No polyline defined for edge {edge}; "
-                    f"known edges: {sorted(self.edge_polylines.keys())[:5]}..."
-                )
-            edges_map[edge] = self.edge_polylines[edge]
+    def routing_geometry(self, active_edges: Sequence[RouteID | IREdge]) -> RoutingGeometry:
+        edges_map: dict[RouteID, IRPolyline] = {}
+        for item in active_edges:
+            if isinstance(item, RouteID):
+                rid = item
+            else:
+                # Legacy tuple: lift to RouteID with default metadata.
+                rid = RouteID(source=int(item[0]), target=int(item[1]))
+            if rid not in self.edge_polylines:
+                known = sorted(self.edge_polylines.keys(), key=route_id_sort_key)[:5]
+                raise KeyError(f"No polyline defined for route {rid}; known routes: {known}...")
+            edges_map[rid] = self.edge_polylines[rid]
         return RoutingGeometry(edges=edges_map, name=self.name)
 
     # ------------------------------------------------------------------
@@ -114,11 +136,16 @@ class JsonPolylineEmbedding:
             "positions": {str(k): list(v) for k, v in sorted(self.positions.items())},
             "edges": [
                 {
-                    "source": int(u),
-                    "target": int(v),
+                    "source": rid.source,
+                    "target": rid.target,
+                    "step_tick": rid.step_tick,
+                    "term_name": rid.term_name,
+                    "instance": rid.instance,
                     "polyline": [list(p) for p in poly],
                 }
-                for (u, v), poly in sorted(self.edge_polylines.items())
+                for rid, poly in sorted(
+                    self.edge_polylines.items(), key=lambda kv: route_id_sort_key(kv[0])
+                )
             ],
         }
 
@@ -132,9 +159,16 @@ class JsonPolylineEmbedding:
                 f"Unsupported schema_version {version}; expected {cls.SCHEMA_VERSION}."
             )
         positions = {int(k): _to_point3(v) for k, v in data["positions"].items()}
-        edge_polylines = {
-            (int(e["source"]), int(e["target"])): _to_polyline(e["polyline"]) for e in data["edges"]
-        }
+        edge_polylines: dict[RouteID, IRPolyline] = {}
+        for e in data["edges"]:
+            rid = RouteID(
+                source=int(e["source"]),
+                target=int(e["target"]),
+                step_tick=int(e.get("step_tick", 0)),
+                term_name=e.get("term_name"),
+                instance=int(e.get("instance", 0)),
+            )
+            edge_polylines[rid] = _to_polyline(e["polyline"])
         return cls(
             positions=positions,
             edge_polylines=edge_polylines,
