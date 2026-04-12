@@ -6,6 +6,8 @@ import tempfile
 import numpy as np
 import pytest
 
+pytest.importorskip("PySide6", reason="PySide6 not installed (install with `uv sync --extra gui`)")
+
 from weave.codes.css_code import CSSCode
 from weave.gui import code_bridge
 from weave.gui.graph_model import GraphModel

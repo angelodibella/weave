@@ -5,6 +5,8 @@ import tempfile
 
 import pytest
 
+pytest.importorskip("PySide6", reason="PySide6 not installed (install with `uv sync --extra gui`)")
+
 from weave.gui.graph_model import GraphModel, is_valid_connection
 
 

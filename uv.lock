@@ -2703,7 +2703,6 @@ dependencies = [
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy" },
-    { name = "pyside6" },
     { name = "sinter" },
     { name = "stim" },
     { name = "stimbposd" },
@@ -2713,9 +2712,13 @@ dependencies = [
 dev = [
     { name = "mypy" },
     { name = "pre-commit" },
+    { name = "pyside6" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+gui = [
+    { name = "pyside6" },
 ]
 notebooks = [
     { name = "notebook" },
@@ -2729,15 +2732,16 @@ requires-dist = [
     { name = "notebook", marker = "extra == 'notebooks'", specifier = ">=7.2.2" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
-    { name = "pyside6", specifier = ">=6.8" },
+    { name = "pyside6", marker = "extra == 'gui'", specifier = ">=6.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.4" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
     { name = "sinter", specifier = ">=1.14.0" },
     { name = "stim", specifier = ">=1.14.0" },
     { name = "stimbposd", specifier = ">=0.0.1" },
+    { name = "weave", extras = ["gui"], marker = "extra == 'dev'" },
 ]
-provides-extras = ["notebooks", "dev"]
+provides-extras = ["gui", "notebooks", "dev"]
 
 [[package]]
 name = "webcolors"

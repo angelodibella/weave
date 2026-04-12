@@ -1022,3 +1022,47 @@ augmentation.
 
 **Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
 **752 tests pass** (up from 742; +10 for PR 17).
+
+## PR 18 — GUI extensions + PySide6 behind `[gui]` extra
+
+Moved PySide6 from a core dependency to the optional `[gui]` extra
+and added three new features to the simulation dialog.
+
+**Structural change: optional PySide6**
+
+- `pyproject.toml` — `pyside6 >=6.8` moved from `dependencies`
+  to `optional-dependencies.gui`. The `[dev]` extra pulls `[gui]`
+  so developer environments auto-install it.
+- Three GUI test files (`test_graph_model.py`, `test_canvas_bridge.py`,
+  `test_code_bridge.py`) guarded with
+  `pytest.importorskip("PySide6", reason=...)`. Without `--extra gui`:
+  714 pass, 3 skip; with `--extra gui`: 752 pass, 0 skip.
+- `wv` entry point (`weave.gui.editor:main`) only fails at
+  invocation, not at `import weave`.
+
+**New GUI features (simulation dialog)**
+
+1. **`GeometryNoiseWidget`** — a collapsible panel in the config
+   tab with: "Enable geometry-induced noise" checkbox, kernel
+   selector (power-law / exponential / crossing), J₀ spinbox,
+   τ spinbox, and kernel-specific parameters (α/r₀ for power-law,
+   ξ for exponential). Hidden fields toggle based on the selected
+   kernel type.
+
+2. **Exposure readout panel** — after a simulation run, if geometry
+   noise is enabled, a "Exposure Analysis" group appears in the
+   results tab showing `J_κ`, total exposure, number of provenance
+   records, and number of correlation edges. These come from a
+   live `compile_extraction` call using the user's configured
+   kernel and `J₀`.
+
+3. **"Optimize Embedding" button** — runs swap descent on the
+   current embedding using the configured kernel parameters,
+   displays a log of the optimization progress (initial → final
+   J_κ, reduction %, iterations, evaluations). For the default
+   serial schedule (which has no parallel CNOT pairs), the button
+   prints an informative message directing the user to
+   `ibm_schedule()` for BB codes.
+
+**Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
+**752 tests** with PySide6 installed; 714 pass + 3 skip without.

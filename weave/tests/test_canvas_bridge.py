@@ -5,6 +5,8 @@ import sys
 import numpy as np
 import pytest
 
+pytest.importorskip("PySide6", reason="PySide6 not installed (install with `uv sync --extra gui`)")
+
 from weave.codes.css_code import CSSCode
 from weave.util import pcm
 
