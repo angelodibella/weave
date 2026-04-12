@@ -845,3 +845,53 @@ reference operating point on BB72).
 **711 tests pass** (down 1 from 712 — one old biplanar test
 collapsed into the rewritten suite; the per-assertion count is
 higher).
+
+## PR 14 — HGP cross-code validation harness
+
+Proved that the SAME `compile_extraction → compute_provenance →
+build_exposure_metrics → residual_distance` pipeline that the BB72
+regression exercises also works on hypergraph product (HGP) codes
+with zero code-family-specific branches.
+
+**New files**
+
+- `weave/tests/test_hgp_compile.py` — 11 tests across six areas:
+
+  1. **Noiseless compile.** `rep(3)×rep(3)` and `rep(3)×rep(4)` both
+     compile via `compile_extraction` + `default_css_schedule` to
+     Stim circuits with zero detector events on 100 noiseless shots.
+  2. **Fingerprint stability.** Two recompiles produce the same
+     SHA256 fingerprint.
+  3. **Weight-≤2 assumption.** The serial `default_css_schedule`
+     vacuously passes (no parallel pair events) for both sectors.
+  4. **Residual distance (Strikis formalism).** `Δ(0) = 1 + d = 4`
+     for the trivial residual on `[[13, 1, 3]]`. The effective
+     distance upper bound from hook residuals of the first Z-check
+     is ≤ `d + 1`.
+  5. **Geometry pass on a custom parallel schedule.** A hand-built
+     schedule with one parallel X-sector CNOT tick (two disjoint
+     Z-check rows) feeds `compute_provenance` and produces ≥1
+     weight-2 provenance record. The same schedule also compiles
+     noiseless to zero detector events (correctness check).
+  6. **Same API as for BB.** The compiled `CompiledExtraction`
+     exposes `provenance`, `correlation_edges`, `exposure_metrics`,
+     `decoder_artifact`, `fingerprint()` — the identical fields the
+     BB72 regression reads. JSON round-trip preserves equality.
+
+**Plan acceptance tests satisfied**
+
+1. ✓ The geometry/exposure pipeline compiles and produces valid
+   provenance on an HGP code using the generic propagator path
+   (no analytical BB shortcut).
+2. ✓ `verify_weight_le_2_assumption` passes on the default serial
+   HGP schedule.
+3. ✓ The Strikis residual-distance formalism produces correct
+   bounds on `rep(3)×rep(3)` (`Δ(0) = 4 = 1 + d`).
+4. Tests 4 (Spearman) and 5 (swap-descent on non-symmetric HGP)
+   require a richer parallel HGP schedule and a per-logical
+   reference family — deferred until PR 15 lands the schedule-
+   import adapters, which make it practical to construct arbitrary
+   parallel HGP schedules from external tools.
+
+**Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
+**722 tests pass** (up from 711; +11 for PR 14).
