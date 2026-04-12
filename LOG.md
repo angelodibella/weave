@@ -941,3 +941,48 @@ Added the `weave.ir.importers` package with three adapters:
 
 **Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
 **733 tests pass** (up from 722; +11 for PR 15).
+
+## PR 16 — `SurfaceEmbedding` and the torus demo
+
+Added `SurfaceEmbedding`, an embedding that places code qubits on
+an arbitrary :class:`~weave.surface.Surface` (the 2D manifold ABC)
+and routes each edge as a geodesic sampled at `num_samples` 3D
+points via the surface's `get_shortest_path` + `get_3d_embedding`.
+The primary use case is a CSS code laid out on a
+:class:`~weave.surface.Torus`, where geodesic polylines wrap
+through the periodic boundary and `polyline_distance` correctly
+measures the 3D chord proximity of routed edges on the torus
+surface.
+
+**New files**
+
+- `weave/ir/embeddings/surface.py` — `SurfaceEmbedding(surface,
+  node_coords, num_samples)`. Implements the `Embedding` protocol
+  directly (not a frozen dataclass, because the underlying `Surface`
+  is mutable). `routing_geometry` samples the covering-space
+  geodesic as N uniformly-spaced 2D points, embeds each in 3D, and
+  returns the tuple of 3D points as the polyline. JSON round-trip
+  reconstructs the surface from its type + parameters.
+- `weave/tests/test_surface_embedding.py` — 9 tests.
+
+**Touched**
+
+- `weave/ir/embeddings/__init__.py` — exports `SurfaceEmbedding`.
+- `weave/ir/embedding.py` — `load_embedding` dispatches `"surface"`
+  type to `SurfaceEmbedding.from_json`.
+
+**Plan acceptance tests satisfied**
+
+1. ✓ **Geodesic distance matches analytical torus formula.** On a
+   10×10 torus, the non-wrapped geodesic length matches Euclidean
+   distance to 1e-10, and a wrapped route (0.5 → 9.5) wraps to
+   length 1.0 instead of 9.0.
+2. ✓ **End-to-end compile.** `rep(3)×rep(3)` on a 10×10 torus
+   compiles to a noiseless Stim circuit with zero detector events.
+3. ✓ **Geometry difference.** The torus embedding produces
+   multi-point sampled polylines (wrapped geodesics) while the
+   flat `StraightLineEmbedding` produces 2-point segments — the
+   torus polyline shape is detectably different.
+
+**Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
+**742 tests pass** (up from 733; +9 for PR 16).

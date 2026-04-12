@@ -222,6 +222,7 @@ def load_embedding(data: dict[str, Any]) -> Embedding:
         JsonPolylineEmbedding,
         MonomialColumnEmbedding,
         StraightLineEmbedding,
+        SurfaceEmbedding,
     )
 
     emb_type = data.get("type")
@@ -237,6 +238,8 @@ def load_embedding(data: dict[str, Any]) -> Embedding:
         return IBMBiplanarEmbedding.from_json(data)
     if emb_type == "fixed_permutation_column":
         return FixedPermutationColumnEmbedding.from_json(data)
+    if emb_type == "surface":
+        return SurfaceEmbedding.from_json(data)
     raise ValueError(
         f"Unknown embedding type {emb_type!r}; expected one of 'straight_line', "
         f"'json_polyline', 'column', 'monomial_column', 'ibm_biplanar', "

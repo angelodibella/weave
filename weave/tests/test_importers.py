@@ -258,9 +258,7 @@ class TestImportedScheduleCompiles:
         assert len(reimported.cycle_steps) > 0
         # The total number of CNOT edges in the reimported schedule
         # should match the original schedule × rounds.
-        sum(
-            1 for s in sched.all_steps() for e in s.active_edges if isinstance(e, TwoQubitEdge)
-        )
+        sum(1 for s in sched.all_steps() for e in s.active_edges if isinstance(e, TwoQubitEdge))
         reimported_cnots = sum(
             1 for s in reimported.cycle_steps for e in s.active_edges if isinstance(e, TwoQubitEdge)
         )

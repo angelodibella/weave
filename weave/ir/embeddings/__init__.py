@@ -26,6 +26,7 @@ from .column import ColumnEmbedding, MonomialColumnEmbedding
 from .fixed_permutation import FixedPermutationColumnEmbedding
 from .json_polyline import JsonPolylineEmbedding
 from .straight_line import StraightLineEmbedding
+from .surface import SurfaceEmbedding
 
 __all__ = [
     "ColumnEmbedding",
@@ -34,4 +35,5 @@ __all__ = [
     "JsonPolylineEmbedding",
     "MonomialColumnEmbedding",
     "StraightLineEmbedding",
+    "SurfaceEmbedding",
 ]
