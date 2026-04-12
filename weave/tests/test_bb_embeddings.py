@@ -37,6 +37,7 @@ from weave.codes.bb import (
     BivariateBicycleCode,
     build_bb72,
     build_bb108,
+    enumerate_pure_L_minwt_logicals,
     ibm_schedule,
 )
 from weave.compiler import compile_extraction
@@ -48,9 +49,16 @@ from weave.ir import (
     IBMBiplanarEmbedding,
     LocalNoiseConfig,
     MonomialColumnEmbedding,
+    RegularizedPowerLawKernel,
     RouteID,
     TwoQubitEdge,
     load_embedding,
+)
+from weave.optimize import (
+    NumpyExposureTemplate,
+    compute_bb_ibm_event_template,
+    j_kappa_numpy,
+    prepare_exposure_template,
 )
 
 # ---------------------------------------------------------------------------
@@ -192,61 +200,104 @@ class TestMonomialColumnEmbedding:
 
 
 class TestIBMBiplanarEmbedding:
-    def test_L_block_at_positive_z(self, bb72, biplanar_bb72):
-        """Every L-block data qubit has `z > 0`."""
-        for q in bb72.data_qubits[: bb72.block_size]:
-            _, _, z = biplanar_bb72.node_position(q)
-            assert z > 0
-
-    def test_R_block_at_negative_z(self, bb72, biplanar_bb72):
-        """Every R-block data qubit has `z < 0`."""
-        for q in bb72.data_qubits[bb72.block_size :]:
-            _, _, z = biplanar_bb72.node_position(q)
-            assert z < 0
-
-    def test_ancillas_at_mid_plane(self, bb72, biplanar_bb72):
-        """Every ancilla sits on `z = 0`."""
-        for q in bb72.z_check_qubits + bb72.x_check_qubits:
+    def test_all_qubits_on_base_plane(self, bb72, biplanar_bb72):
+        """In the bounded-thickness biplanar layout, ALL qubits sit
+        on the z=0 base plane. The layer separation happens in the
+        POLYLINES (6-point lift/descend), not in the positions."""
+        for q in bb72.qubits:
             _, _, z = biplanar_bb72.node_position(q)
             assert z == 0.0
 
-    def test_z_ancilla_half_offset_x(self, bb72, biplanar_bb72):
-        """Z-ancillas sit at (i + 0.5, j, 0)."""
-        for idx, q in enumerate(bb72.z_check_qubits):
-            j, i = divmod(idx, bb72.l)
-            x, y, z = biplanar_bb72.node_position(q)
-            assert x == float(i) + 0.5
-            assert y == float(j)
-            assert z == 0.0
+    def test_chequerboard_grid(self, bb72, biplanar_bb72):
+        """L-data at (2a, 2b), X-anc at (2a+1, 2b), Z-anc at (2a, 2b+1),
+        R-data at (2a+1, 2b+1) — matching bbstim's toric biplanar grid."""
+        # Check cell (0, 0).
+        lx, ly, lz = biplanar_bb72.node_position(bb72.data_qubits[0])
+        assert (lx, ly, lz) == (0.0, 0.0, 0.0)  # L-data at (0, 0)
+        zx, zy, zz = biplanar_bb72.node_position(bb72.z_check_qubits[0])
+        assert (zx, zy, zz) == (0.0, 1.0, 0.0)  # Z-anc at (0, 1)
+        xx, xy, xz = biplanar_bb72.node_position(bb72.x_check_qubits[0])
+        assert (xx, xy, xz) == (1.0, 0.0, 0.0)  # X-anc at (1, 0)
+        rx, ry, rz = biplanar_bb72.node_position(bb72.data_qubits[bb72.block_size])
+        assert (rx, ry, rz) == (1.0, 1.0, 0.0)  # R-data at (1, 1)
 
-    def test_x_ancilla_half_offset_y(self, bb72, biplanar_bb72):
-        """X-ancillas sit at (i, j + 0.5, 0)."""
-        for idx, q in enumerate(bb72.x_check_qubits):
-            j, i = divmod(idx, bb72.l)
-            x, y, z = biplanar_bb72.node_position(q)
-            assert x == float(i)
-            assert y == float(j) + 0.5
-            assert z == 0.0
+    def test_polylines_are_6_point(self, bb72, biplanar_bb72):
+        """Each biplanar routing polyline has 6 points (the
+        base → port → lift → traverse → descend → base structure)."""
+        sched = ibm_schedule(bb72)
+        first_cnot_layer = sched.cycle_steps[1]
+        edge = first_cnot_layer.active_edges[0]
+        rid = RouteID(
+            source=edge.control,
+            target=edge.target,
+            step_tick=1,
+            term_name=edge.term_name,
+        )
+        rg = biplanar_bb72.routing_geometry([rid])
+        poly = list(rg.edges.values())[0]
+        assert len(poly) == 6
 
-    def test_L_and_R_edges_have_opposite_sign_z_average(self, bb72, biplanar_bb72):
-        """Plan acceptance test 2: a CNOT polyline from an L-block data
-        qubit to a Z-ancilla has mean `z > 0`; the symmetric R-block
-        polyline has mean `z < 0`."""
-        L_data = bb72.data_qubits[0]
-        R_data = bb72.data_qubits[bb72.block_size]
-        z_anc = bb72.z_check_qubits[0]
-        rg = biplanar_bb72.routing_geometry([(L_data, z_anc), (R_data, z_anc)])
-        L_poly = rg[(L_data, z_anc)]
-        R_poly = rg[(R_data, z_anc)]
-        L_mean_z = sum(p[2] for p in L_poly) / len(L_poly)
-        R_mean_z = sum(p[2] for p in R_poly) / len(R_poly)
-        assert L_mean_z > 0
-        assert R_mean_z < 0
+    def test_layer_A_routes_through_positive_z(self, bb72, biplanar_bb72):
+        """Edges tagged A2, A3, or B3 route through z > 0 at the
+        midpoint of their polyline (the lift/traverse segment)."""
+        sched = ibm_schedule(bb72)
+        for step in sched.cycle_steps:
+            if step.role != "cnot_layer":
+                continue
+            for edge in step.active_edges:
+                if not isinstance(edge, TwoQubitEdge):
+                    continue
+                if edge.term_name in ("A2", "A3", "B3"):
+                    rid = RouteID(
+                        source=edge.control,
+                        target=edge.target,
+                        step_tick=step.tick_index,
+                        term_name=edge.term_name,
+                    )
+                    rg = biplanar_bb72.routing_geometry([rid])
+                    poly = list(rg.edges.values())[0]
+                    # Points 2 and 3 are the lifted traverse.
+                    assert poly[2][2] > 0, f"term {edge.term_name} z={poly[2][2]}"
+                    return  # One sample is enough.
+        pytest.fail("No layer-A edge found")
 
-    def test_layer_height_configurable(self, bb72):
-        emb = IBMBiplanarEmbedding.from_bb(bb72, layer_height=0.25)
-        assert emb.node_position(bb72.data_qubits[0])[2] == 0.25
-        assert emb.node_position(bb72.data_qubits[bb72.block_size])[2] == -0.25
+    def test_layer_B_routes_through_negative_z(self, bb72, biplanar_bb72):
+        """Edges tagged A1, B1, or B2 route through z < 0."""
+        sched = ibm_schedule(bb72)
+        for step in sched.cycle_steps:
+            if step.role != "cnot_layer":
+                continue
+            for edge in step.active_edges:
+                if not isinstance(edge, TwoQubitEdge):
+                    continue
+                if edge.term_name in ("A1", "B1", "B2"):
+                    rid = RouteID(
+                        source=edge.control,
+                        target=edge.target,
+                        step_tick=step.tick_index,
+                        term_name=edge.term_name,
+                    )
+                    rg = biplanar_bb72.routing_geometry([rid])
+                    poly = list(rg.edges.values())[0]
+                    assert poly[2][2] < 0, f"term {edge.term_name} z={poly[2][2]}"
+                    return
+        pytest.fail("No layer-B edge found")
+
+    def test_monomial_exposure_exceeds_biplanar(self, bb72):
+        """The monomial layout has strictly higher J_kappa than the
+        biplanar layout at the reference operating point. This is
+        the central physical claim of the biplanar construction."""
+        sched = ibm_schedule(bb72)
+        ref = enumerate_pure_L_minwt_logicals(bb72, sector="X")
+        tmpl = compute_bb_ibm_event_template(bb72, sched)
+        exp_t = prepare_exposure_template(tmpl, ref)
+        np_t = NumpyExposureTemplate.from_exposure_template(exp_t)
+        kernel = RegularizedPowerLawKernel(alpha=3.0, r0=1.0)
+        mono = MonomialColumnEmbedding.from_bb(bb72)
+        bipl = IBMBiplanarEmbedding.from_bb(bb72)
+        mono_j = j_kappa_numpy(np.asarray(mono.positions), np_t, kernel, J0=0.04, tau=1.0)
+        bipl_j = j_kappa_numpy(np.asarray(bipl.positions), np_t, kernel, J0=0.04, tau=1.0)
+        assert mono_j > bipl_j
 
     def test_invalid_layer_height_rejected(self, bb72):
         with pytest.raises(ValueError, match="layer_height"):

@@ -204,12 +204,13 @@ def ibm_schedule(
     # data qubit is hit exactly once per layer, so the CNOTs are
     # fully parallel.
 
-    for b_mon in bb_code.B_monomials:
+    for k, b_mon in enumerate(bb_code.B_monomials):
         cycle.append(
             _z_check_layer(
                 tick=tick,
                 monomial=b_mon,
                 block="L",
+                family_label=f"B{k + 1}",
                 l=l,
                 m=m,
                 lm=lm,
@@ -220,12 +221,13 @@ def ibm_schedule(
         )
         tick += 1
 
-    for a_mon in bb_code.A_monomials:
+    for k, a_mon in enumerate(bb_code.A_monomials):
         cycle.append(
             _z_check_layer(
                 tick=tick,
                 monomial=a_mon,
                 block="R",
+                family_label=f"A{k + 1}",
                 l=l,
                 m=m,
                 lm=lm,
@@ -241,12 +243,13 @@ def ibm_schedule(
     # CNOTs to R-data. CNOT direction is x-ancilla → data
     # (x-ancilla is control, data is target).
 
-    for a_mon in bb_code.A_monomials:
+    for k, a_mon in enumerate(bb_code.A_monomials):
         cycle.append(
             _x_check_layer(
                 tick=tick,
                 monomial=a_mon,
                 block="L",
+                family_label=f"A{k + 1}",
                 l=l,
                 m=m,
                 lm=lm,
@@ -257,12 +260,13 @@ def ibm_schedule(
         )
         tick += 1
 
-    for b_mon in bb_code.B_monomials:
+    for k, b_mon in enumerate(bb_code.B_monomials):
         cycle.append(
             _x_check_layer(
                 tick=tick,
                 monomial=b_mon,
                 block="R",
+                family_label=f"B{k + 1}",
                 l=l,
                 m=m,
                 lm=lm,
@@ -333,6 +337,7 @@ def _z_check_layer(
     tick: int,
     monomial: Monomial,
     block: Literal["L", "R"],
+    family_label: str,
     l: int,
     m: int,
     lm: int,
@@ -366,7 +371,7 @@ def _z_check_layer(
                     control=data_q,
                     target=z_anc,
                     interaction_sector="X",
-                    term_name=f"BB.{block}[{d1},{d2}]→z[{i1},{j}]",
+                    term_name=family_label,
                 )
             )
     active: set[int] = set()
@@ -387,6 +392,7 @@ def _x_check_layer(
     tick: int,
     monomial: Monomial,
     block: Literal["L", "R"],
+    family_label: str,
     l: int,
     m: int,
     lm: int,
@@ -421,7 +427,7 @@ def _x_check_layer(
                     control=x_anc,
                     target=data_q,
                     interaction_sector="Z",
-                    term_name=f"BB.{block}[{d1},{d2}]←x[{i1},{j}]",
+                    term_name=family_label,
                 )
             )
     active: set[int] = set()

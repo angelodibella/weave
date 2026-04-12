@@ -1,7 +1,7 @@
 {
   "all_pass": true,
   "bbstim_match": true,
-  "fingerprint": "50711bc0e6133569c3373ea833d50330911a7ff66aa75db89fcbfc025a885449",
+  "fingerprint": "cfb2e6097f2c2e924a2d4c625fb3a74237bbd2200163d8de1a86a3e9877a0597",
   "j_kappa_monomial": 0.03362433763890464,
   "j_kappa_optimized": 0.023673221429025643,
   "note": "Weave-only regression fixture. Numerical cross-check against bbstim is limited to the pure-L X-logical set equality (see bbstim_bb72_pureL_minwt_logicals.csv).",

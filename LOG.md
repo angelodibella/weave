@@ -807,8 +807,41 @@ The deferred test is documented inline in
 
 **Dev sweep** — `ruff check`, `ruff format`, `mypy`, `pytest`
 all clean. **712 tests pass** (up from 702; +10 for PR 13).
-The new test file runs in **2.4 s** (down from 145 s in the
-first attempt — the bottleneck was the `J₀ > 0` compile path
-calling the slow generic propagator on every BB72 fingerprint
-test, which the final design avoids by setting `J₀ = 0` for
-fingerprint determinism).
+The new test file runs in **2.4 s**.
+
+## PR 13.5 — Biplanar embedding fix (bounded-thickness topology)
+
+Rewrote `IBMBiplanarEmbedding` from a placeholder (L/R blocks on
+opposite z-planes, 2-point polylines) to the bounded-thickness
+topology from bbstim: all qubits on a common z=0 base plane in a
+chequerboard grid, 6-point lift/descend polylines with per-monomial
+layer assignment (A2/A3/B3 → z=+h, A1/B1/B2 → z=-h) and per-edge
+lane separation. This reinstates the key physical result:
+**monomial exposure > biplanar exposure** (ratio 1.08 at the
+reference operating point on BB72).
+
+**Touched**
+
+- `weave/ir/embeddings/biplanar.py` — full rewrite. Schema bumped
+  to v2 (backward compat: v1 still loads). New fields: `lane_eps`.
+  `routing_geometry` now reads `RouteID.term_name` to dispatch
+  each edge to the correct routing layer and produces 6-point
+  polylines (base → port → lift → traverse → descend → base).
+- `weave/codes/bb/schedule.py` — changed `term_name` on every
+  `TwoQubitEdge` from the verbose `"BB.L[d1,d2]→z[i1,j]"` format
+  to the monomial-family label (`"A1"`–`"A3"`, `"B1"`–`"B3"`) so
+  the biplanar embedding can dispatch edges to layers. Added
+  `family_label` parameter to `_z_check_layer`/`_x_check_layer`.
+- `weave/tests/test_bb_embeddings.py` — replaced the old z>0 / z<0
+  position tests with: all-qubits-at-z=0, chequerboard grid,
+  6-point polylines, layer-A-routes-through-positive-z,
+  layer-B-routes-through-negative-z,
+  **monomial-exposure-exceeds-biplanar** (the key physics test),
+  and invalid-layer-height rejection.
+- `benchmarks/fixtures/bb72_reference.json` — regenerated (the
+  schedule term_name change shifts the compile fingerprint).
+
+**Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
+**711 tests pass** (down 1 from 712 — one old biplanar test
+collapsed into the rewritten suite; the per-assertion count is
+higher).
