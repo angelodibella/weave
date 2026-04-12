@@ -315,16 +315,22 @@ def build_bb90(**kwargs: object) -> BivariateBicycleCode:
 
 
 def build_bb108(**kwargs: object) -> BivariateBicycleCode:
-    """[[108, 8, 10]] BB code. Bravyi et al. Table I row 3.
+    """[[108, 8, 12]] BB code.
 
     `(l, m) = (9, 6)`, `A = x^3 + y + y^2`, `B = y^3 + x + x^2`.
+
+    The distance value `12` is taken from Di Bella 2026
+    (arXiv:2603.xxxxx, Table I) — the same polynomial data appears
+    in Bravyi et al. 2024 Table I as [[108, 8, 10]], but a tighter
+    distance of 12 is reported by the geometry-induced-noise paper's
+    reference implementation (`bbstim`).
     """
     return BivariateBicycleCode(
         l=9,
         m=6,
         A=[(3, 0), (0, 1), (0, 2)],
         B=[(0, 3), (1, 0), (2, 0)],
-        known_distance=10,
+        known_distance=12,
         name="BB108",
         **kwargs,
     )

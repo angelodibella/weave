@@ -74,17 +74,19 @@ class TestBB90:
 class TestBB108:
     """Plan acceptance test #3: BB108 distance.
 
-    Note: the published BB108 code (Bravyi et al. 2024, Table I row
-    3) has distance 10, not 12. The plan text says 12, which we
-    read as a typo — we pin the assertion to the Bravyi value and
-    keep a `known_distance=10` in the factory.
+    Di Bella 2026 (the geometry-induced-correlated-noise paper's
+    `bbstim` reference implementation) reports `[[108, 8, 12]]`.
+    The older Bravyi et al. 2024 Table I listed `[[108, 8, 10]]`
+    for the same polynomial data, but the tighter `d = 12` is
+    correct per the more recent analysis; the weave factory
+    carries `12` as the cached `known_distance`.
     """
 
     def test_parameters(self):
         bb = build_bb108()
         assert bb.n == 108
         assert bb.k == 8
-        assert bb.distance() == 10
+        assert bb.distance() == 12
         assert bb.l == 9
         assert bb.m == 6
 

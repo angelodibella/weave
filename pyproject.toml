@@ -77,6 +77,8 @@ ignore = [
 # BB embeddings share the same `l, m` naming for BB parameters.
 "weave/ir/embeddings/column.py" = ["E741"]
 "weave/ir/embeddings/biplanar.py" = ["E741"]
+# BB benchmarks reuse the same math-convention naming.
+"benchmarks/regression/bb72.py" = ["N802", "E741"]
 
 [tool.mypy]
 python_version = "3.10"

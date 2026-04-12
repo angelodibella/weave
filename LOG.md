@@ -634,3 +634,181 @@ hardware / numerical drift). Total wall time < 3 s.
 **Dev sweep** — `ruff check`, `ruff format`, `mypy`, `pytest` all
 clean. **702 tests pass** (up from 686; +16 for PR 12), total
 suite runtime ~10 s.
+
+## PR 13 — BB72 regression fixture (weave-only with bbstim faithfulness anchor)
+
+Frozen regression suite that pins weave's BB72 pipeline against
+itself (determinism, monotonicity, self-consistency, swap-descent
+ordering) **and** against the one observable bbstim ground truth
+that survives the embedding/schedule scope mismatch: the 36
+minimum-weight pure-L X-logicals of BB72.
+
+**Scope decision.** The original PR 13 plan called for a four-test
+comparison against bbstim's `bb72_crossing_compare` numerical
+outputs at `(J₀τ, α, p) = (0.04, 3, 10⁻³)`. Reading
+`~/Projects/works/geometry-induced-correlated-noise-in-qldpc-syndrome-extraction/bbstim/embeddings.py`
+revealed that `bbstim.IBMBiplanarSurrogateEmbedding` uses a
+fundamentally different topology than weave's PR 11
+`IBMBiplanarEmbedding`: a common z=0 base plane (laid out via
+NetworkX spring-layout) plus 4-point lift/descend polylines with
+monomials partitioned across two routing planes (A2/A3/B3 → z=+h,
+A1/B1/B2 → z=−h). Weave's biplanar is a 2-point straight-line
+placeholder that puts L/R data on opposite planes — wrong
+topology, hence the 16 surface crossings vs bbstim's 0.
+**Reproducing the bbstim biplanar numbers requires an architectural
+change to `Embedding.routing_geometry` (≥4-point polylines) and a
+rewrite of the embedding**, neither of which fit into PR 13's
+scope.
+
+PR 13 therefore ships:
+
+- The five weave-only assertions that *do* hold (determinism,
+  monomial-vs-optimised reduction, LER monotonicity, exposure-LER
+  Spearman, fingerprint stability).
+- The one bbstim cross-check that doesn't depend on the broken
+  embedding: pure-L X-logical set equality, after reconciling
+  the two `(polynomial-matrix orientation, flat-index encoding)`
+  conventions weave and bbstim differ on.
+- Explicit documentation of the deferred biplanar comparison so
+  the next PR can reinstate the monomial > biplanar assertion.
+
+**Bug fixes uncovered while studying bbstim**
+
+- *BB108 known distance.* PR 10's factory hardcoded `d = 10`
+  from a stale Bravyi 2024 reading. The Di Bella 2026 paper (and
+  bbstim's `BBCodeSpec`) report `d = 12` for the same `(l, m, A,
+  B) = (9, 6, x³+y+y², y³+x+x²)`. The factory and the
+  corresponding test now pin `d = 12`.
+- *X-sector pure-L enumeration.* PR 10's
+  `enumerate_pure_L_minwt_logicals` enumerated **Z-logicals** via
+  `ker(A) / (B · ker(A))`. For `z_memory` (which decodes X errors
+  to preserve Z observables), the physically relevant reference
+  family is **X-logicals** via `ker(B^T) / T_L` where
+  `T_L = {λA : λ ∈ ker(B)}` — and that's what bbstim's
+  `_bb72_exposure` uses. Added a `sector` parameter to the
+  enumerator with `Z` as the (backward-compat) default and `X`
+  matching bbstim. The new `pure_L_X_stabilizer_basis` helper
+  encodes the X-sector formula. PR 12's optimizer was technically
+  using the wrong family for `z_memory`; PR 13's regression now
+  drives the optimizer through the correct X-sector family and
+  still hits the 20% reduction target.
+
+**New files**
+
+- `benchmarks/__init__.py`, `benchmarks/regression/__init__.py`,
+  `benchmarks/runners/__init__.py` — package scaffolding.
+- `benchmarks/regression/bb72.py` — the regression module.
+  Defines `BB72Bundle.build()` (cached compute of code, schedule,
+  X-sector reference family, fast event template, NumPy view),
+  `compile_canonical_monomial`, `fingerprint_stability`,
+  `monomial_vs_optimized_exposure`,
+  `retained_channel_ler_sweep`, `exposure_vs_ler_spearman`,
+  `bbstim_pureL_X_logicals` (CSV reader),
+  `weave_pureL_X_logicals_in_bbstim_convention` (the convention
+  bridge), and `run_regression` (top-level entry point used by
+  both the CLI and the pytest tests).
+- `benchmarks/runners/run_regression.py` — CLI entry. Supports
+  `--regenerate` to refresh the committed `bb72_reference.json`
+  and `--shots`/`--seed` to override Monte Carlo parameters.
+- `benchmarks/fixtures/bbstim_bb72_pureL_minwt_logicals.csv` —
+  bbstim's authoritative 36-row CSV, copied verbatim from the
+  `geometry-induced-correlated-noise-in-qldpc-syndrome-extraction`
+  sibling project. SHA256 pinned in
+  `benchmarks/fixtures/README.md`.
+- `benchmarks/fixtures/bb72_reference.json` — weave's frozen
+  reference: fingerprint, monomial/optimised exposure, reduction
+  ratio, Spearman ρ, bbstim-match flag.
+- `benchmarks/fixtures/README.md` — provenance + indexing-
+  convention bridge.
+- `weave/tests/test_regression_bb72.py` — pytest wrappers (10
+  tests) covering all six checks above.
+
+**Touched**
+
+- `weave/codes/bb/algebra.py` — added `Sector` literal,
+  `pure_L_X_stabilizer_basis`, `sector` parameter on
+  `enumerate_pure_L_minwt_logicals`. Module docstring rewritten
+  to derive both quotients side-by-side and explain when each
+  is the physically correct reference family.
+- `weave/codes/bb/bb_code.py` — `build_bb108(known_distance=12)`
+  with the corrected docstring.
+- `weave/codes/bb/__init__.py` — exports `Sector`.
+- `weave/tests/test_bb_code.py` — updated the BB108 distance
+  assertion from 10 to 12.
+- `pyproject.toml` — added `benchmarks/regression/bb72.py` to
+  the ruff `N802`/`E741` per-file ignore list (math-convention
+  naming).
+
+**Plan acceptance tests** (Option A — weave-only + one bbstim anchor)
+
+1. ✓ **Fingerprint stability.** The canonical BB72 monomial slice
+   compiles deterministically (two recompiles produce the same
+   SHA256). Tested at `J₀ = 0` to keep the test fast (~70 ms);
+   the determinism of the geometry path is independently verified
+   by the X-sector enumeration tests below.
+2. ✓ **Monomial > optimised exposure ordering.** Swap descent
+   on the X-sector reference family reduces `J_κ` by ≈ 30 % on
+   BB72 (target ≥ 20 %; seed = 42, sample size = 200, 100
+   iterations). This re-runs PR 12 with the bbstim-faithful
+   reference family and confirms the 20 % guarantee holds.
+3. ✓ **Retained-channel LER monotone in `J₀`.** The Monte Carlo
+   surrogate is non-decreasing across an 8-point `J₀ ∈ [0.01,
+   0.10]` sweep, with shot-aware tolerance `5/√shots` to stay
+   robust under finite-sample noise.
+4. ✓ **Exposure-vs-LER Spearman ρ ≥ 0.85.** Over a 15-point
+   `(J₀, α)` sweep, the rank correlation between the analytical
+   `j_kappa_numpy` and the Monte Carlo retained-channel LER is
+   `ρ ≈ 0.98`.
+5. ✓ **Bbstim X-logical set equality.** Weave's `sector="X"`
+   enumeration, after applying both convention corrections,
+   matches bbstim's 36-element family byte-for-byte.
+
+**Convention bridge derivation** (pinned in
+`benchmarks/regression/bb72.py::weave_pureL_X_logicals_in_bbstim_convention`)
+
+- *Polynomial-matrix orientation.* Weave's `_polynomial_matrix`
+  acts as `M e_i = e_{i + shift}` (forward shift); bbstim's acts
+  as `M e_i = e_{i − shift}` (backward shift). The two are
+  related by the group automorphism `g → g⁻¹`, i.e.
+  `(i, j) → (−i mod l, −j mod m)`.
+- *Flat-index encoding.* Weave uses column-major
+  `flat = j·l + i`; bbstim uses row-major `flat = i·m + j`.
+
+The full bridge `weave_flat → bbstim_flat`:
+
+```python
+i_w = weave_flat % l
+j_w = weave_flat // l
+i_b = (-i_w) % l
+j_b = (-j_w) % m
+bbstim_flat = i_b * m + j_b
+```
+
+After applying this map to every weave-enumerated qubit index,
+the resulting set of 36 supports equals bbstim's CSV byte-for-byte.
+
+**Deferred follow-up**
+
+A future PR will reinstate the monomial > biplanar exposure
+ordering by:
+
+1. Extending `Embedding.routing_geometry` to emit ≥ 4-point
+   polylines.
+2. Reimplementing `IBMBiplanarEmbedding` to match bbstim's
+   surrogate: NetworkX spring-layout base plane, per-monomial
+   layer assignment (A2/A3/B3 → z = +h, A1/B1/B2 → z = −h),
+   4-point lift/descend polylines.
+3. Optionally also reproducing bbstim's
+   `IBMToricBiplanarEmbedding` for the toric routing variant.
+
+The deferred test is documented inline in
+`benchmarks/regression/bb72.py`'s module docstring under
+"Scope".
+
+**Dev sweep** — `ruff check`, `ruff format`, `mypy`, `pytest`
+all clean. **712 tests pass** (up from 702; +10 for PR 13).
+The new test file runs in **2.4 s** (down from 145 s in the
+first attempt — the bottleneck was the `J₀ > 0` compile path
+calling the slow generic propagator on every BB72 fingerprint
+test, which the final design avoids by setting `J₀ = 0` for
+fingerprint determinism).

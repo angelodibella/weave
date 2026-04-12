@@ -37,7 +37,7 @@ See also
 
 from __future__ import annotations
 
-from .algebra import enumerate_pure_L_minwt_logicals
+from .algebra import Sector, enumerate_pure_L_minwt_logicals
 from .bb_code import (
     BivariateBicycleCode,
     Monomial,
@@ -51,6 +51,7 @@ from .schedule import ibm_schedule
 __all__ = [
     "BivariateBicycleCode",
     "Monomial",
+    "Sector",
     "build_bb72",
     "build_bb90",
     "build_bb108",
