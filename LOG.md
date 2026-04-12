@@ -986,3 +986,39 @@ surface.
 
 **Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
 **742 tests pass** (up from 733; +9 for PR 16).
+
+## PR 17 — `DecoderArtifact` adapter methods
+
+Added the three decoder adapter methods to the PR 9 shell:
+
+- **`to_bposd_decoder(dem, ...)`** — returns a `stimbposd.BPOSD`
+  instance configured against the compiled DEM. The non-decomposed
+  DEM from `compile_extraction` (which contains `CORRELATED_ERROR`
+  mechanisms from the geometry pass) is fed directly to BP+OSD,
+  which handles arbitrary-weight error mechanisms natively.
+- **`to_pymatching(dem)`** — returns a `pymatching.Matching`
+  instance built from the compiled DEM. PyMatching v2.2+ accepts
+  non-decomposed DEMs and internally converts hyperedge error
+  mechanisms into matching-graph edges.
+- **`to_pair_prior_dict()`** — returns a simple
+  `{(qubit_a, qubit_b): probability}` dict for downstream
+  consumers that want the raw pair-edge weights without a decoder.
+
+**Tests** — 10 new (752 total): `to_pair_prior_dict` structure and
+key alignment, BPOSD decoder acceptance and successful decoding of
+at least one shot, PyMatching acceptance and decoding, compiled
+provenance/artifact/DEM sanity checks. All tests use a compiled
+Steane [[7,1,3]] circuit with a custom parallel schedule and
+`J_0 > 0` so the DEM contains at least one `CORRELATED_ERROR`.
+
+**Key finding during PR 17:** PyMatching v2.2.2 (current in
+weave's deps) accepts non-decomposed DEMs without error. The plan's
+note about "correlated PyMatching in open PRs" is outdated —
+`pymatching.Matching.from_detector_error_model(dem)` works out of
+the box on the non-decomposed DEM that `compile_extraction` emits.
+This means both decoder paths (BP+OSD and MWPM) are fully
+functional on geometry-noise circuits without any manual DEM
+augmentation.
+
+**Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
+**752 tests pass** (up from 742; +10 for PR 17).

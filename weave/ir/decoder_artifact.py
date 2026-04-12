@@ -1,17 +1,29 @@
-r"""`DecoderArtifact` — pure-data bundle for correlation-aware decoders.
+r"""`DecoderArtifact` — pure-data bundle and decoder adapters.
 
 Decoders that consume weave output (PyMatching for matching codes,
 `stimbposd` / BP-OSD for general CSS codes) need a compact
 description of the retained pair channel in a form that is decoupled
 from the full Stim DEM. This module holds that description as a
-frozen, JSON-round-trippable dataclass.
+frozen, JSON-round-trippable dataclass and provides adapter methods
+that turn the artifact into ready-to-use decoder instances:
 
-PR 9 ships the shell form: a list of pair edges, a per-data-qubit
-single-error prior, and a `decoder_hint` string used to dispatch to
-the appropriate adapter. PR 17 will add the actual
-`to_pymatching_hint()` and `to_bposd_dem()` adapter methods; for now
-they remain unimplemented and the artifact serves mainly as a
-canonical table for benchmarks and the fingerprint.
+- :meth:`DecoderArtifact.to_bposd_decoder` — returns a
+  ``stimbposd.BPOSD`` instance configured against the compiled DEM.
+- :meth:`DecoderArtifact.to_pymatching` — returns a
+  ``pymatching.Matching`` instance built from the compiled DEM.
+- :meth:`DecoderArtifact.to_pair_prior_dict` — returns a simple
+  ``{(qubit_a, qubit_b): probability}`` dict for downstream
+  consumers that want the raw pair-edge weights.
+
+Both decoders accept the non-decomposed DEM that
+:func:`~weave.compiler.compile_extraction` produces when geometry
+noise is active (``decompose_errors=False``):
+
+- **stimbposd** (BP+OSD) handles arbitrary-weight error mechanisms
+  natively; no decomposition needed.
+- **PyMatching** v2.2+ accepts non-decomposed DEMs by converting
+  hyperedge error mechanisms into equivalent matching-graph edges
+  via the method of Higgott & Gidney (2023, arXiv:2309.15354).
 
 References
 ----------
@@ -21,6 +33,9 @@ References
 - Roffe, White, Burton, Campbell, *Decoding across the quantum
   low-density parity-check code landscape*, Phys. Rev. Research 2,
   043423 (2020), arXiv:2005.07016. BP+OSD reference.
+- Higgott, Gidney, *Sparse Blossom: correcting a million errors
+  per core second with minimum-weight matching*, arXiv:2303.15933
+  (2023). PyMatching v2 reference.
 """
 
 from __future__ import annotations
@@ -102,6 +117,108 @@ class DecoderArtifact:
     def num_pair_edges(self) -> int:
         """Convenience: number of distinct pair edges."""
         return len(self.pair_edges)
+
+    # ------------------------------------------------------------------
+    # Decoder adapters (PR 17)
+    # ------------------------------------------------------------------
+
+    def to_pair_prior_dict(self) -> dict[tuple[int, int], float]:
+        """Return the pair-edge weights as a simple dict.
+
+        Returns
+        -------
+        dict[tuple[int, int], float]
+            Maps `(qubit_a, qubit_b)` → `pair_probability` for every
+            weight-2 pair edge in the artifact. Empty dict when no
+            pair edges exist.
+
+        Examples
+        --------
+        >>> artifact.to_pair_prior_dict()
+        {(0, 2): 0.061, (1, 5): 0.033}
+        """
+        return {(int(a), int(b)): float(w) for a, b, w in self.pair_edges}
+
+    def to_bposd_decoder(
+        self,
+        dem: Any,
+        *,
+        max_bp_iters: int = 30,
+        osd_order: int = 60,
+        bp_method: str = "product_sum",
+        osd_method: str = "osd_cs",
+        **bposd_kwargs: Any,
+    ) -> Any:
+        """Build a ``stimbposd.BPOSD`` decoder from the compiled DEM.
+
+        The compiled DEM already contains the ``CORRELATED_ERROR``
+        mechanisms injected by the geometry pass (in non-decomposed
+        form), so BP+OSD sees the full retained-channel noise model
+        without any additional augmentation. This method is a thin
+        convenience wrapper that imports ``stimbposd`` and
+        instantiates the decoder with the provided hyperparameters.
+
+        Parameters
+        ----------
+        dem : stim.DetectorErrorModel
+            The DEM from :attr:`CompiledExtraction.dem`. Must be the
+            non-decomposed form emitted by ``compile_extraction``
+            when ``provenance`` is non-empty.
+        max_bp_iters, osd_order, bp_method, osd_method :
+            BP+OSD hyperparameters; forwarded to
+            ``stimbposd.BPOSD.__init__``.
+        **bposd_kwargs :
+            Additional keyword arguments for ``stimbposd.BPOSD``.
+
+        Returns
+        -------
+        stimbposd.BPOSD
+            A ready-to-use decoder instance. Call
+            ``.decode(syndrome_vector)`` or ``.decode_batch(shots)``
+            to decode.
+
+        Raises
+        ------
+        ImportError
+            If ``stimbposd`` is not installed.
+        """
+        import stimbposd
+
+        return stimbposd.BPOSD(
+            dem,
+            max_bp_iters=max_bp_iters,
+            osd_order=osd_order,
+            bp_method=bp_method,
+            osd_method=osd_method,
+            **bposd_kwargs,
+        )
+
+    def to_pymatching(self, dem: Any) -> Any:
+        """Build a ``pymatching.Matching`` from the compiled DEM.
+
+        PyMatching v2.2+ accepts non-decomposed DEMs and internally
+        converts hyperedge error mechanisms into matching-graph
+        edges. The returned ``Matching`` object is ready for
+        ``.decode(syndrome_vector)`` or ``.decode_batch(shots)``.
+
+        Parameters
+        ----------
+        dem : stim.DetectorErrorModel
+            The DEM from :attr:`CompiledExtraction.dem`.
+
+        Returns
+        -------
+        pymatching.Matching
+            A ready-to-use MWPM decoder instance.
+
+        Raises
+        ------
+        ImportError
+            If ``pymatching`` is not installed.
+        """
+        import pymatching
+
+        return pymatching.Matching.from_detector_error_model(dem)
 
     def to_json(self) -> dict[str, Any]:
         return {
