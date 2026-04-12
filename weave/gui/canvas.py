@@ -398,6 +398,20 @@ class Canvas(QWidget):
             file_path += ".csv"
         code_bridge.export_code_csv(self.model, file_path)
 
+    def _open_code_template(self):
+        """Open the code template library dialog."""
+        from .code_templates import CodeTemplateDialog
+
+        dialog = CodeTemplateDialog(self, self)
+        dialog.exec()
+
+    def _show_help(self):
+        """Open the help / keyboard shortcut dialog."""
+        from .help_dialog import HelpDialog
+
+        dialog = HelpDialog(self)
+        dialog.exec()
+
     def _run_simulation(self):
         try:
             css_code = self.to_css_code()

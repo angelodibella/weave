@@ -1066,3 +1066,50 @@ and added three new features to the simulation dialog.
 
 **Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
 **752 tests** with PySide6 installed; 714 pass + 3 skip without.
+
+## PR 18.5 — GUI overhaul: code templates, status bar, help system, tutorial
+
+Major UX improvements to make the GUI publication-ready and
+intuitive for first-time users.
+
+**New files**
+
+- `weave/gui/code_templates.py` — **Code Template Library** dialog.
+  A dropdown with six presets: Steane [[7,1,3]], Shor/rep(3)×rep(3)
+  [[13,1,3]], HGP rep(3)×rep(4) [[18,1,3]], HGP Hamming(7)×Hamming(7)
+  [[58,16]], BB72 [[72,12,6]], BB144 [[144,12,12]]. One-click loads
+  the Tanner graph onto the canvas with a spring-force layout. Each
+  template has a short description explaining the code.
+- `weave/gui/help_dialog.py` — **Help & Shortcuts** dialog with
+  an HTML-formatted quick-start guide, keyboard shortcut tables,
+  geometry noise parameter explanations (J₀, τ, α, r₀, ξ), and a
+  description of the simulation workflow. Accessible from the
+  hamburger menu or discoverable in the first 30 seconds of use.
+- `examples/gui_tutorial.md` — **GUI Tutorial**: a step-by-step
+  text-based walkthrough from first launch to running a simulation
+  with geometry-induced noise, in ~10 minutes. Covers: launching,
+  loading a template, navigating the canvas, detecting graphs,
+  running noiseless and noisy simulations, enabling geometry noise,
+  reading the exposure readout, and trying larger codes (BB72).
+
+**Touched**
+
+- `weave/gui/editor.py` — rewrote `MainWindow` to include a live
+  **status bar** showing node/edge/graph counts, code parameters
+  `[[n, k]]`, crossing count, and grid-mode indicator. Connects
+  to `GraphModel.model_changed`, `graph_detected`, `graph_removed`
+  signals for live updates. Window title set to "Weave Editor",
+  default size increased to 1000×700.
+- `weave/gui/canvas.py` — added `_open_code_template()` and
+  `_show_help()` action methods that open the respective dialogs.
+- `weave/gui/menus.py` — added **"New Code from Template..."** and
+  **"Help & Shortcuts..."** actions to the hamburger menu, placed
+  prominently before the separator.
+
+**Acceptance test**
+
+- Headless `uv sync` (without `--extra gui`) runs `uv run pytest`
+  cleanly: 714 pass, 3 skip (GUI tests auto-skip).
+- `uv sync --extra gui` installs PySide6 and runs all 752 tests.
+
+**Dev sweep** — 752 tests, ruff/format/mypy clean.

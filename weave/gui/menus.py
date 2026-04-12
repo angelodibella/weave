@@ -147,8 +147,13 @@ def build_hamburger_menu(canvas: Canvas) -> QMenu:
 
     menu.addSeparator()
 
+    menu.addAction("New Code from Template...", canvas._open_code_template)
     menu.addAction("Simulate...", canvas._run_simulation)
     menu.addAction("Export Code...", canvas._export_code)
+
+    menu.addSeparator()
+
+    menu.addAction("Help && Shortcuts...", canvas._show_help)
 
     menu.addSeparator()
 
