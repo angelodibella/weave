@@ -895,3 +895,49 @@ with zero code-family-specific branches.
 
 **Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
 **722 tests pass** (up from 711; +11 for PR 14).
+
+## PR 15 — Schedule and embedding import adapters
+
+Added the `weave.ir.importers` package with three adapters:
+
+- **`schedule_from_json_file(path) → Schedule`** — thin wrapper
+  over `Schedule.from_json` that opens, parses, and deserialises a
+  JSON file. The recommended interchange format for schedules
+  produced by external tools.
+- **`embedding_from_json_file(path) → Embedding`** — thin wrapper
+  over `load_embedding` for JSON-serialised embeddings. Handles
+  all six shipped embedding types.
+- **`schedule_from_stim_circuit(circuit, qubit_roles) → Schedule`**
+  — the non-trivial adapter. Walks a `stim.Circuit` instruction-
+  by-instruction, groups gates between ``TICK`` markers into
+  ``ScheduleStep`` objects, detects a single top-level ``REPEAT``
+  block for head / cycle / tail partitioning, maps Stim
+  instructions to ``ScheduleEdge`` objects (``CX`` → ``TwoQubitEdge("CNOT")``,
+  ``H`` → ``SingleQubitEdge("H")``, etc.), infers ``ScheduleRole``
+  from gate types, and heuristically assigns ``interaction_sector``
+  from CNOT direction (data → ancilla = X, ancilla → data = Z).
+  Noise and annotation instructions (``DEPOLARIZE*``,
+  ``CORRELATED_ERROR``, ``DETECTOR``, ``OBSERVABLE_INCLUDE``) are
+  silently skipped.
+
+**Tests** — 11 new (733 total):
+- JSON file round-trips on Steane schedule and ``StraightLineEmbedding``.
+- Stim circuit import: head/cycle/tail structure, CNOT control/target,
+  sector inference (X for data→ancilla, Z for ancilla→data), H steps
+  classified as ``single_q``, noise instructions dropped, name
+  propagated.
+- Integration: a compiled Steane circuit re-imported via the adapter
+  recovers the correct CNOT count (2 rounds × cycle depth) and both
+  X/Z sector annotations.
+
+**Limitations (documented in the module docstring)**:
+- ``compile_extraction`` unrolls rounds (no ``REPEAT`` in the emitted
+  Stim text), so the re-imported schedule has everything in the cycle
+  block. Heuristic cycle-boundary detection from a flat instruction
+  stream is a future enhancement.
+- Nested ``REPEAT`` blocks are not supported.
+- ``interaction_sector`` inference is heuristic: ambiguous directions
+  (both qubits data or both ancilla) produce ``None``.
+
+**Dev sweep** — `ruff`, `format`, `mypy`, `pytest` all clean.
+**733 tests pass** (up from 722; +11 for PR 15).
