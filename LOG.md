@@ -1113,3 +1113,30 @@ intuitive for first-time users.
 - `uv sync --extra gui` installs PySide6 and runs all 752 tests.
 
 **Dev sweep** — 752 tests, ruff/format/mypy clean.
+
+## PR 19 — Tutorial notebook and documentation pass
+
+Rewrote `examples/Tutorial.ipynb` as a clean, 22-cell notebook that
+takes a user from code construction to LER plot with provenance in
+under 20 minutes. Every cell executes without errors via
+`jupyter nbconvert --execute` (verified in CI).
+
+**Notebook structure (10 sections, ~2 min runtime):**
+
+1. CSS codes — Steane [[7,1,3]] and HGP rep(3)xrep(3).
+2. BB codes — BB72 factory + pure-L X-logical enumeration.
+3. Compilation — `compile_extraction` on Steane with local noise.
+4. Decoding — BP+OSD and PyMatching on the compiled DEM.
+5. BB72 exposure analysis — fast analytical template, J_kappa
+   monomial vs biplanar at the reference operating point.
+6. Exposure vs J_0 sweep — publication-quality matplotlib plot.
+7. Swap-descent optimization — 30% reduction in 2 seconds.
+8. Three-embedding comparison — monomial / biplanar / optimized.
+9. Residual-error analysis — Strikis formalism on Steane.
+10. Summary — key objects and next steps.
+
+**Outputs:** Three matplotlib figures (exposure sweep, optimization
+history, three-embedding comparison) suitable for the paper.
+
+**Dev sweep** — 752 tests, ruff/format/mypy clean. Notebook
+executes in ~45 seconds.
